@@ -499,6 +499,11 @@ class AmonStrike:
             "race_condition":("modules.race_condition","RaceConditionModule"),
             "http_smuggling":("modules.http_smuggling","HttpSmugglingModule"),
             "xxe":         ("modules.xxe",         "XxeModule"),
+            "graphql_deep":    ("modules.graphql_deep",    "GraphqlDeepModule"),
+            "oauth":           ("modules.oauth",           "OauthModule"),
+            "business_logic":  ("modules.business_logic",  "BusinessLogicModule"),
+            "cache_poison":    ("modules.cache_poison",    "CachePoisonModule"),
+            "deserialization": ("modules.deserialization", "DeserializationModule"),
             "graphql_deep":("modules.graphql_deep", "GraphqlDeepModule"),
             "oauth":        ("modules.oauth",        "OauthModule"),
             "business_logic":("modules.business_logic","BusinessLogicModule"),
@@ -659,6 +664,32 @@ class AmonStrike:
         self._print_summary()
         sys.exit(0)
 
+
+
+def run_recon_pipeline(domain: str, output_dir: str = "output/recon"):
+    """Run the full ProjectDiscovery recon pipeline."""
+    from recon.pipeline import ReconPipeline
+    pipe = ReconPipeline(domain, output_dir)
+    return pipe.run()
+
+def run_monitor(domains: list, interval: int = 3600):
+    """Start the continuous recon monitor."""
+    from recon.monitor import ReconMonitor
+    mon = ReconMonitor()
+    for domain in domains:
+        mon.add_target(domain, scan_interval=interval)
+    mon.start(daemon=False)
+
+def run_idor_scan(target: str, credentials: list = None):
+    """Run authenticated IDOR scan."""
+    from recon.auth_engine import SessionManager, IDORScanner
+    sm = SessionManager(target)
+    if credentials:
+        for cred in credentials:
+            sm.add_user(cred["username"], cred["password"], cred.get("role","user"))
+        sm.login_all()
+    scanner = IDORScanner(target, sm)
+    return scanner.scan()
 
 def main():
     parser = argparse.ArgumentParser(

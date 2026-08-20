@@ -82,3 +82,17 @@ Target: http://x.com
 URL: http://x.com
 Time: 2026-08-20 20:18:00
 ============================================================
+🚨 AmonStrike Alert
+Severity: CRITICAL
+Finding: SQLi
+Target: http://x.com
+URL: http://x.com
+Time: 2026-08-20 20:27:27
+============================================================
+🚨 AmonStrike Alert
+Severity: CRITICAL
+Finding: SQLi
+Target: http://x.com
+URL: http://x.com
+Time: 2026-08-20 20:30:07
+============================================================
