@@ -1160,8 +1160,8 @@ def run_stress_tests():
         # 1. Mass node creation
         ("Mass node creation (1000 nodes)",
          lambda: (
-             [engine.add_node(NodeType.DIRECTORY, f"/stress/{i}") for i in range(1000)]
-             and len(engine.nodes) >= 1000
+             [engine.add_node(NodeType.DIRECTORY, f"/mass_stress_test/{i}") for i in range(1000)]
+             and len([n for n in engine.nodes.values() if "/mass_stress_test/" in n.value]) == 1000
          )),
 
         # 2. Duplicate handling at scale
