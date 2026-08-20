@@ -1,0 +1,1 @@
+"""AmonStrike core package."""
