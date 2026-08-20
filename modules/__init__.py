@@ -1,0 +1,1 @@
+"""AmonStrike modules package."""

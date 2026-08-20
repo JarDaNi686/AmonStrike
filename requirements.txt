@@ -1,0 +1,12 @@
+requests
+beautifulsoup4
+lxml
+urllib3
+colorama
+jinja2
+weasyprint
+python-nmap
+dnspython
+pyjwt
+cryptography
+tqdm
