@@ -4,9 +4,6 @@ lxml
 urllib3
 colorama
 jinja2
-weasyprint
-python-nmap
-dnspython
-pyjwt
-cryptography
 tqdm
+flask
+flask-cors

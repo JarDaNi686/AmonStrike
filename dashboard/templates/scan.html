@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container">
+  <h2 style="margin:24px 0 16px;font-size:18px;color:#888">Launch Scan</h2>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">Scan Configuration</div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div><label style="font-size:12px;color:#888">Target URL</label><input id="s-url" placeholder="http://target.com" style="margin-top:4px"/></div>
+        <div><label style="font-size:12px;color:#888">Scan Mode</label>
+          <select id="s-mode" style="margin-top:4px">
+            <option value="fast">Fast (~5 min) — Essential checks</option>
+            <option value="normal" selected>Normal (~15 min) — All modules</option>
+            <option value="deep">Deep (~45 min) — All + NDE + tools</option>
+            <option value="nde">NDE — Full autonomous recon</option>
+          </select>
+        </div>
+        <div><label style="font-size:12px;color:#888">Modules (comma-separated or 'all')</label><input id="s-mods" value="all" style="margin-top:4px"/></div>
+        <button class="btn" onclick="startScan()" style="width:100%;padding:12px">▶ Start Scan</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Quick Targets</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn btn-blue" onclick="setTarget('http://testphp.vulnweb.com')">testphp.vulnweb.com</button>
+        <button class="btn btn-blue" onclick="setTarget('http://testaspnet.vulnweb.com')">testaspnet.vulnweb.com</button>
+        <button class="btn btn-blue" onclick="setTarget('http://testasp.vulnweb.com')">testasp.vulnweb.com</button>
+        <button class="btn btn-blue" onclick="setTarget('http://demo.testfire.net')">demo.testfire.net</button>
+      </div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <div class="card-title">Scan Output</div>
+    <div class="log-panel" id="scan-log"></div>
+  </div>
+</div>
+{% endblock %}
+{% block script %}
+<script>
+function setTarget(url) { document.getElementById('s-url').value = url; }
+async function startScan() {
+  const url  = document.getElementById('s-url').value;
+  const mode = document.getElementById('s-mode').value.split(' ')[0];
+  const mods = document.getElementById('s-mods').value;
+  if (!url) return alert('Enter a URL');
+  await fetch('/api/scan/start', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({url,mode,modules:mods})
+  });
+  addLog(`Scan started: ${url} (${mode})`, '+');
+}
+const logEl = document.getElementById('scan-log');
+const evtSrc = new EventSource('/api/logs');
+evtSrc.onmessage = e => {
+  const entry = JSON.parse(e.data);
+  addLog(`[${entry.ts}] ${entry.msg}`, entry.level);
+};
+function addLog(msg, level='*') {
+  const cls = {'+':'log-plus','!':'log-bang','~':'log-tilde','i':'log-info','*':'log-star'}[level]||'log-star';
+  const d   = document.createElement('div');
+  d.className = 'log-line ' + cls;
+  d.textContent = msg;
+  logEl.appendChild(d);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+</script>
+{% endblock %}

@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container">
+  <h2 style="margin:24px 0 16px;font-size:18px;color:#888">Operations Center</h2>
+
+  <div class="grid-4" id="stats-grid">
+    <div class="card"><div class="card-title">Programs</div><div class="stat-value" id="s-programs">—</div></div>
+    <div class="card"><div class="card-title">Total Findings</div><div class="stat-value" id="s-findings">—</div></div>
+    <div class="card"><div class="card-title">Critical</div><div class="stat-value" style="color:#C0392B" id="s-critical">—</div></div>
+    <div class="card"><div class="card-title">Earned (USD)</div><div class="stat-value" style="color:#27AE60" id="s-earned">—</div></div>
+    <div class="card"><div class="card-title">Scans Run</div><div class="stat-value" id="s-scans">—</div></div>
+    <div class="card"><div class="card-title">Submitted</div><div class="stat-value" id="s-submitted">—</div></div>
+    <div class="card"><div class="card-title">High</div><div class="stat-value" style="color:#E74C3C" id="s-high">—</div></div>
+    <div class="card"><div class="card-title">New (Unreviewed)</div><div class="stat-value" style="color:#E67E22" id="s-new">—</div></div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">Quick Scan</div>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <input id="q-url" placeholder="http://target.com" style="flex:1"/>
+        <select id="q-mode" style="width:120px">
+          <option>fast</option><option selected>normal</option>
+          <option>deep</option><option>nde</option>
+        </select>
+        <button class="btn" onclick="quickScan()">▶ Scan</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Platform Actions</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-blue" onclick="fetchPrograms()">↓ Fetch Programs</button>
+        <a href="/programs" class="btn btn-green">📋 Leaderboard</a>
+      </div>
+      <div id="action-status" style="margin-top:8px;font-size:12px;color:#888"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title" style="display:flex;justify-content:space-between">
+      Live Scan Log
+      <button class="btn" style="padding:4px 10px;font-size:11px" onclick="clearLog()">Clear</button>
+    </div>
+    <div class="log-panel" id="log-panel"></div>
+  </div>
+</div>
+{% endblock %}
+{% block script %}
+<script>
+// Load stats
+async function loadStats() {
+  const s = await api('/api/stats');
+  document.getElementById('s-programs').textContent  = s.programs  || 0;
+  document.getElementById('s-findings').textContent  = s.findings  || 0;
+  document.getElementById('s-critical').textContent  = s.critical  || 0;
+  document.getElementById('s-earned').textContent    = '$'+(s.earned_usd||0).toLocaleString();
+  document.getElementById('s-scans').textContent     = s.scans     || 0;
+  document.getElementById('s-submitted').textContent = s.submitted || 0;
+  document.getElementById('s-high').textContent      = s.high      || 0;
+  document.getElementById('s-new').textContent       = s.new       || 0;
+}
+loadStats();
+setInterval(loadStats, 10000);
+
+// Live logs
+const logPanel = document.getElementById('log-panel');
+const evtSrc   = new EventSource('/api/logs');
+evtSrc.onmessage = e => {
+  const entry  = JSON.parse(e.data);
+  const cls    = {'+':'log-plus','!':'log-bang','~':'log-tilde','i':'log-info','*':'log-star'}[entry.level]||'log-star';
+  const div    = document.createElement('div');
+  div.className = 'log-line ' + cls;
+  div.textContent = `[${entry.ts}] [${entry.level}] ${entry.msg}`;
+  logPanel.appendChild(div);
+  logPanel.scrollTop = logPanel.scrollHeight;
+};
+
+async function quickScan() {
+  const url  = document.getElementById('q-url').value;
+  const mode = document.getElementById('q-mode').value;
+  if (!url) return;
+  await fetch('/api/scan/start', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({url, mode})
+  });
+}
+
+async function fetchPrograms() {
+  document.getElementById('action-status').textContent = 'Fetching...';
+  await fetch('/api/fetch_programs', {method:'POST'});
+  document.getElementById('action-status').textContent = 'Programs fetching in background';
+}
+
+function clearLog() { logPanel.innerHTML = ''; }
+</script>
+{% endblock %}

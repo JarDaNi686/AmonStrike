@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container">
+  <h2 style="margin:24px 0 16px;font-size:18px;color:#888">All Findings</h2>
+  <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+    <button class="btn" onclick="loadFindings()">All</button>
+    <button class="btn" style="background:#C0392B" onclick="loadFindings('CRITICAL')">Critical</button>
+    <button class="btn" style="background:#E74C3C" onclick="loadFindings('HIGH')">High</button>
+    <button class="btn" style="background:#E67E22" onclick="loadFindings('MEDIUM')">Medium</button>
+    <button class="btn" style="background:#27AE60" onclick="loadFindings('LOW')">Low</button>
+  </div>
+  <div class="card">
+    <table>
+      <tr><th>#</th><th>Severity</th><th>Title</th><th>Module</th><th>URL</th><th>Status</th><th>Found</th></tr>
+      <tbody id="findings-tbody"></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+{% block script %}
+<script>
+async function loadFindings(sev) {
+  let url = '/api/findings?limit=100';
+  if (sev) url += '&severity=' + sev;
+  const findings = await api(url);
+  const tbody = document.getElementById('findings-tbody');
+  tbody.innerHTML = findings.map((f,i) => `
+    <tr>
+      <td>${i+1}</td>
+      <td><span class="badge ${setBadgeClass(f.severity)}">${f.severity}</span></td>
+      <td>${f.title}</td>
+      <td><code>${f.module||''}</code></td>
+      <td><code style="font-size:11px">${(f.url||'').slice(0,50)}</code></td>
+      <td>${f.status||'new'}</td>
+      <td>${(f.found_at||'').slice(0,10)}</td>
+    </tr>
+  `).join('');
+}
+loadFindings();
+</script>
+{% endblock %}

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container">
+  <h2 style="margin:24px 0 16px;font-size:18px;color:#888">Earnings Tracker</h2>
+  <div class="grid-4">
+    <div class="card"><div class="card-title">Total Earned</div><div class="stat-value" style="color:#27AE60" id="e-total">—</div></div>
+    <div class="card"><div class="card-title">Avg Per Finding</div><div class="stat-value" id="e-avg">—</div></div>
+    <div class="card"><div class="card-title">Biggest Bounty</div><div class="stat-value" style="color:#E67E22" id="e-max">—</div></div>
+    <div class="card"><div class="card-title">Total Payments</div><div class="stat-value" id="e-count">—</div></div>
+  </div>
+  <div class="grid-2">
+    <div class="card"><div class="card-title">By Platform</div><table><tr><th>Platform</th><th>Payments</th><th>Total</th></tr><tbody id="e-platform"></tbody></table></div>
+    <div class="card"><div class="card-title">By Severity</div><table><tr><th>Severity</th><th>Count</th><th>Total</th></tr><tbody id="e-severity"></tbody></table></div>
+  </div>
+</div>
+{% endblock %}
+{% block script %}
+<script>
+async function loadEarnings() {
+  const data = await api('/api/earnings');
+  const s    = data.summary || {};
+  document.getElementById('e-total').textContent = '$'+(s.total_usd||0).toLocaleString(undefined,{minimumFractionDigits:2});
+  document.getElementById('e-avg').textContent   = '$'+(s.avg_per_finding||0).toFixed(0);
+  document.getElementById('e-max').textContent   = '$'+(s.biggest_bounty||0).toLocaleString();
+  document.getElementById('e-count').textContent = s.total_payments||0;
+  document.getElementById('e-platform').innerHTML = (data.by_platform||[]).map(p=>`<tr><td>${p.platform}</td><td>${p.count}</td><td>$${(p.total||0).toFixed(0)}</td></tr>`).join('');
+  document.getElementById('e-severity').innerHTML = (data.by_severity||[]).map(s=>`<tr><td><span class="badge ${setBadgeClass(s.severity)}">${s.severity}</span></td><td>${s.count}</td><td>$${(s.total||0).toFixed(0)}</td></tr>`).join('');
+}
+loadEarnings();
+</script>
+{% endblock %}
