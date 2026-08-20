@@ -83,6 +83,7 @@ ALL_MODULES = [
     "osint", "waf", "takeover", "credentials",
     "ssti", "jwt_deep", "race_condition",
     "http_smuggling", "xxe",
+    "graphql_deep", "oauth", "business_logic", "cache_poison",
 ]
 
 def log(msg, level="*"):
@@ -498,6 +499,10 @@ class AmonStrike:
             "race_condition":("modules.race_condition","RaceConditionModule"),
             "http_smuggling":("modules.http_smuggling","HttpSmugglingModule"),
             "xxe":         ("modules.xxe",         "XxeModule"),
+            "graphql_deep":("modules.graphql_deep", "GraphqlDeepModule"),
+            "oauth":        ("modules.oauth",        "OauthModule"),
+            "business_logic":("modules.business_logic","BusinessLogicModule"),
+            "cache_poison": ("modules.cache_poison",  "CachePoisonModule"),
         }
 
         if name not in module_map:
