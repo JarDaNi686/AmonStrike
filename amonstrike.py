@@ -2,15 +2,19 @@
 """
 AmonStrike — Hidden Reconnaissance, Precise Strike
 Author: JarDani
-Version: 1.0
+Version: 2.0
 
-Egyptian god Amon sees the hidden. AmonStrike finds the hidden vulnerabilities.
+The Never Dead-End Bug Bounty Recon Framework.
+Every finding feeds the next attack. Every dead-end has a fallback.
+A real target is NEVER clean. There is ALWAYS something.
 
 Usage:
     sudo python3 amonstrike.py
     sudo python3 amonstrike.py --url http://target.com
     sudo python3 amonstrike.py --url http://target.com --modules all
-    sudo python3 amonstrike.py --url http://target.com --modules recon,sqli,xss
+    sudo python3 amonstrike.py --url http://target.com --mode fast
+    sudo python3 amonstrike.py --url http://target.com --mode deep
+    sudo python3 amonstrike.py --url http://target.com --no-ui
 """
 
 import os
@@ -19,20 +23,17 @@ import time
 import json
 import argparse
 import threading
+import signal
 from datetime import datetime
 from urllib.parse import urlparse
 
-# ── Color codes ──────────────────────────────────────────────
-R  = "\033[91m"
-G  = "\033[92m"
-Y  = "\033[93m"
-B  = "\033[94m"
-M  = "\033[95m"
-C  = "\033[96m"
-W  = "\033[97m"
-D  = "\033[90m"
-X  = "\033[0m"
-BLD = "\033[1m"
+# Add project root to path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# ── Colors ───────────────────────────────────────────────────
+R = "\033[91m"; G = "\033[92m"; Y = "\033[93m"
+C = "\033[96m"; W = "\033[97m"; D = "\033[90m"
+X = "\033[0m";  BLD = "\033[1m"
 
 BANNER = f"""
 {D}  ════════════════════════════════════════════════════════════════════{X}
@@ -46,274 +47,646 @@ BANNER = f"""
 {X}
 {D}         Hidden Reconnaissance. Precise Strike. Professional Report.{X}
 {D}  ════════════════════════════════════════════════════════════════════{X}
-{D}         Author: JarDani    Version: 1.0    Bug Bounty Edition{X}
+{D}         Author: JarDani    Version: 2.0    Never Dead-End Edition{X}
 {D}  ════════════════════════════════════════════════════════════════════{X}
 """
 
-# ── Available modules ────────────────────────────────────────
-MODULES = {
-    "recon":      "Reconnaissance — headers, tech stack, DNS, WHOIS, SSL",
-    "ports":      "Port scanning — open ports and services",
-    "dirs":       "Directory/file enumeration — hidden paths",
-    "api":        "API endpoint discovery and testing",
-    "auth":       "Authentication testing — login, JWT, session",
-    "sqli":       "SQL Injection — GET/POST/headers",
-    "xss":        "Cross-Site Scripting — reflected/stored",
-    "csrf":       "CSRF — token detection and bypass",
-    "idor":       "IDOR — Insecure Direct Object Reference",
-    "ssrf":       "SSRF — Server-Side Request Forgery",
-    "lfi":        "LFI/RFI — Local/Remote File Inclusion",
-    "headers":    "Security headers analysis",
-    "cookies":    "Cookie security flags analysis",
-    "cors":       "CORS misconfiguration",
-    "rce":        "Command injection / RCE detection",
-    "info":       "Information disclosure — errors, comments, metadata",
+# ── Scan modes ────────────────────────────────────────────────
+SCAN_MODES = {
+    "fast": {
+        "desc": "Quick scan — essential checks only (~5 min)",
+        "modules": ["recon", "headers", "cookies", "cors", "info", "dirs"],
+        "nde":     False,
+    },
+    "normal": {
+        "desc": "Standard scan — all modules (~15 min)",
+        "modules": "all",
+        "nde":     True,
+    },
+    "deep": {
+        "desc": "Deep scan — all modules + NDE + tool chaining (~45 min)",
+        "modules": "all",
+        "nde":     True,
+    },
+    "nde": {
+        "desc": "Never Dead-End mode — full autonomous recon",
+        "modules": "all",
+        "nde":     True,
+    },
 }
 
-def log(msg, level="*", color=None):
+# ── Module list ───────────────────────────────────────────────
+ALL_MODULES = [
+    "recon", "headers", "sqli", "xss", "csrf", "cors",
+    "cookies", "dirs", "lfi", "ssrf", "idor", "rce",
+    "auth", "api", "info", "ports",
+]
+
+def log(msg, level="*"):
     ts = datetime.now().strftime("%H:%M:%S")
     colors = {"*": D, "!": R, "+": G, "~": Y, "i": C}
-    c = color or colors.get(level, D)
+    c = colors.get(level, D)
     print(f"[{ts}] {c}[AS/{level}]{X} {msg}")
 
 def get_input(prompt, default=None):
-    if default:
-        result = input(f"{W}{prompt}{X} [{D}{default}{X}]: ").strip()
-        return result if result else default
-    return input(f"{W}{prompt}{X}: ").strip()
+    d_str = f" [{D}{default}{X}]" if default else ""
+    result = input(f"  {W}{prompt}{X}{d_str}: ").strip()
+    return result if result else default
 
 def validate_url(url):
-    """Validate and normalize URL."""
+    if not url:
+        return None
     if not url.startswith(("http://", "https://")):
         url = "http://" + url
     try:
-        parsed = urlparse(url)
-        if not parsed.netloc:
+        p = urlparse(url)
+        if not p.netloc:
             return None
         return url.rstrip("/")
-    except:
+    except Exception:
         return None
 
-def select_modules():
-    """Interactive module selection."""
-    print(f"\n{D}  Available modules:{X}\n")
-    for i, (name, desc) in enumerate(MODULES.items(), 1):
-        print(f"  {D}[{i:2d}]{X} {R}{name:<12}{X} {D}─{X} {desc}")
-    print(f"\n  {D}[{' 0':2s}]{X} {G}all{X}         {D}─{X} Run all modules")
-    print()
-
-    choice = get_input("  Select modules (e.g. 1,3,5 or 'all' or module names)", "all")
-
-    if choice.lower() == "all" or choice == "0":
-        return list(MODULES.keys())
-
-    selected = []
-    # Handle comma-separated numbers or names
-    for part in choice.split(","):
-        part = part.strip()
-        if part.isdigit():
-            idx = int(part) - 1
-            if 0 <= idx < len(MODULES):
-                selected.append(list(MODULES.keys())[idx])
-        elif part in MODULES:
-            selected.append(part)
-
-    return selected if selected else list(MODULES.keys())
-
-def print_summary(url, modules, output_dir):
-    """Print attack configuration summary."""
-    print()
-    print(f"{D}  ┌{'─'*60}┐{X}")
-    print(f"{D}  │{X}{R} MISSION PARAMETERS{X}{D}{'':>41}│{X}")
-    print(f"{D}  ├{'─'*60}┤{X}")
-    print(f"{D}  │{X}  {W}Target URL:{X}    {R}{url}{X}")
-    print(f"{D}  │{X}  {W}Modules:{X}       {G}{', '.join(modules)}{X}")
-    print(f"{D}  │{X}  {W}Output:{X}        {C}{output_dir}{X}")
-    print(f"{D}  │{X}  {W}Started:{X}       {D}{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}{X}")
-    print(f"{D}  └{'─'*60}┘{X}")
-    print()
-
-def run_module(name, url, session_data, results):
-    """Dynamically load and run a module."""
+def detect_kali_ip():
+    import socket
     try:
-        if name == "recon":
-            from modules.recon import ReconModule
-            m = ReconModule(url, session_data)
-        elif name == "ports":
-            from modules.ports import PortModule
-            m = PortModule(url, session_data)
-        elif name == "dirs":
-            from modules.dirs import DirModule
-            m = DirModule(url, session_data)
-        elif name == "api":
-            from modules.api import ApiModule
-            m = ApiModule(url, session_data)
-        elif name == "auth":
-            from modules.auth import AuthModule
-            m = AuthModule(url, session_data)
-        elif name == "sqli":
-            from modules.sqli import SqliModule
-            m = SqliModule(url, session_data)
-        elif name == "xss":
-            from modules.xss import XssModule
-            m = XssModule(url, session_data)
-        elif name == "csrf":
-            from modules.csrf import CsrfModule
-            m = CsrfModule(url, session_data)
-        elif name == "idor":
-            from modules.idor import IdorModule
-            m = IdorModule(url, session_data)
-        elif name == "ssrf":
-            from modules.ssrf import SsrfModule
-            m = SsrfModule(url, session_data)
-        elif name == "lfi":
-            from modules.lfi import LfiModule
-            m = LfiModule(url, session_data)
-        elif name == "headers":
-            from modules.headers import HeadersModule
-            m = HeadersModule(url, session_data)
-        elif name == "cookies":
-            from modules.cookies import CookiesModule
-            m = CookiesModule(url, session_data)
-        elif name == "cors":
-            from modules.cors import CorsModule
-            m = CorsModule(url, session_data)
-        elif name == "rce":
-            from modules.rce import RceModule
-            m = RceModule(url, session_data)
-        elif name == "info":
-            from modules.info import InfoModule
-            m = InfoModule(url, session_data)
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+def setup_output_dir(url):
+    parsed = urlparse(url)
+    safe = parsed.netloc.replace(":", "_").replace(".", "_")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_dir = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "output", f"{safe}_{ts}"
+    )
+    os.makedirs(out_dir, exist_ok=True)
+    return out_dir
+
+
+class AmonStrike:
+    """
+    Main orchestrator.
+    Wires together: UI + Installer + NDE Engine + Modules + Report.
+    """
+
+    def __init__(self, args):
+        self.args      = args
+        self.url       = args.url
+        self.mode      = args.mode
+        self.use_ui    = not args.no_ui
+        self.use_nde   = not args.no_nde
+        self.output_dir = None
+        self.ui        = None
+        self.nde       = None
+        self.results   = {}
+        self.all_findings = []
+        self._stop     = threading.Event()
+
+    def run(self):
+        """Main entry point."""
+        print(BANNER)
+
+        # Check root
+        if os.geteuid() != 0:
+            print(f"{R}[!]{X} Run with sudo: sudo python3 amonstrike.py")
+            sys.exit(1)
+
+        # Get URL
+        if not self.url:
+            print(f"{D}  Configure your scan:{X}\n")
+            raw = get_input("Target URL")
+            self.url = validate_url(raw)
+            if not self.url:
+                print(f"{R}[!]{X} Invalid URL")
+                sys.exit(1)
+
+        # Validate URL
+        self.url = validate_url(self.url)
+        if not self.url:
+            print(f"{R}[!]{X} Invalid URL: {self.args.url}")
+            sys.exit(1)
+
+        # Setup output
+        self.output_dir = setup_output_dir(self.url)
+        log(f"Output directory: {self.output_dir}", "i")
+
+        # Get modules
+        modules = self._resolve_modules()
+
+        # Session data
+        self.session_data = {
+            "url":        self.url,
+            "parsed":     urlparse(self.url),
+            "timeout":    self.args.timeout,
+            "threads":    self.args.threads,
+            "proxy":      {"http": self.args.proxy, "https": self.args.proxy}
+                          if self.args.proxy else None,
+            "cookies":    self.args.cookies or "",
+            "headers":    json.loads(self.args.headers) if self.args.headers else {},
+            "wordlist":   self.args.wordlist,
+            "output_dir": self.output_dir,
+            "mode":       self.mode,
+        }
+
+        # Print mission brief
+        self._print_brief(modules)
+        confirm = input(f"\n  {W}Start? (Enter to continue / Ctrl+C to cancel){X}: ")
+        print()
+
+        # Setup signal handler
+        signal.signal(signal.SIGINT, self._handle_interrupt)
+
+        # Phase 1: Auto-install tools
+        tool_status = self._run_installer(modules)
+
+        # Phase 2: Start UI
+        if self.use_ui:
+            self._start_ui()
+
+        # Phase 3: Run NDE engine (if enabled)
+        if self.use_nde and self.mode in ["deep", "nde", "normal"]:
+            self._run_nde_engine()
+
+        # Phase 4: Run scan modules
+        self._run_modules(modules, tool_status)
+
+        # Phase 5: Stop UI
+        if self.ui:
+            self.ui.stop()
+            time.sleep(0.5)
+
+        # Phase 6: Merge all findings
+        self._merge_findings()
+
+        # Phase 7: Generate report
+        self._generate_report(modules)
+
+        # Phase 8: Print summary
+        self._print_summary()
+
+    def _resolve_modules(self):
+        """Resolve which modules to run based on mode and args."""
+        if self.args.modules:
+            if self.args.modules.lower() == "all":
+                return ALL_MODULES
+            return [m.strip() for m in self.args.modules.split(",")
+                   if m.strip() in ALL_MODULES]
+
+        mode_cfg = SCAN_MODES.get(self.mode, SCAN_MODES["normal"])
+        mods = mode_cfg["modules"]
+        if mods == "all":
+            return ALL_MODULES
+        return mods
+
+    def _print_brief(self, modules):
+        """Print mission parameters."""
+        mode_desc = SCAN_MODES.get(self.mode, {}).get("desc", "")
+        print(f"\n{D}  {'─'*65}{X}")
+        print(f"{R}  MISSION PARAMETERS{X}")
+        print(f"{D}  {'─'*65}{X}")
+        print(f"  {W}Target:{X}    {R}{self.url}{X}")
+        print(f"  {W}Mode:{X}      {Y}{self.mode}{X} — {D}{mode_desc}{X}")
+        print(f"  {W}Modules:{X}   {G}{', '.join(modules)}{X}")
+        print(f"  {W}NDE:{X}       {'Enabled' if self.use_nde else 'Disabled'}")
+        print(f"  {W}UI:{X}        {'Split terminal' if self.use_ui else 'Standard output'}")
+        print(f"  {W}Output:{X}    {D}{self.output_dir}{X}")
+        print(f"{D}  {'─'*65}{X}")
+
+    def _run_installer(self, modules):
+        """Run auto-installer for all required tools."""
+        log("Checking and installing required tools...", "*")
+        try:
+            from core.installer import ToolInstaller
+
+            # Map modules to required tools
+            module_tools = {
+                "recon":   ["nmap", "whatweb", "curl"],
+                "dirs":    ["gobuster", "ffuf", "feroxbuster"],
+                "sqli":    ["sqlmap"],
+                "xss":     ["dalfox"],
+                "cors":    [],
+                "headers": [],
+                "ports":   ["nmap", "masscan"],
+                "api":     ["curl"],
+                "auth":    ["hydra"],
+                "info":    ["whatweb"],
+                "lfi":     [],
+                "ssrf":    [],
+                "idor":    [],
+                "rce":     [],
+                "csrf":    [],
+                "cookies": [],
+            }
+
+            # Collect needed tools
+            needed = set()
+            for mod in modules:
+                needed.update(module_tools.get(mod, []))
+
+            # Also need NDE tools
+            if self.use_nde:
+                needed.update(["nmap", "subfinder", "amass", "dnsx",
+                               "ffuf", "gobuster", "whatweb", "nuclei"])
+
+            installer = ToolInstaller(verbose=True)
+            tool_status = installer.check_and_install_all(
+                tools=list(needed)
+            )
+
+            if self.ui:
+                available = sum(1 for s in tool_status.values()
+                               if s.get("status") in ["available", "installed"])
+                self.ui.log(f"Tools ready: {available}/{len(needed)}", "+", "installer")
+
+            return tool_status
+
+        except Exception as e:
+            log(f"Installer error: {e} — continuing with built-in modules", "~")
+            return {}
+
+    def _start_ui(self):
+        """Start the real-time console UI."""
+        try:
+            from core.console_ui import ConsoleUI
+            self.ui = ConsoleUI()
+            self.ui.update_stats(
+                target=self.url,
+                current_phase="Starting"
+            )
+            # Start UI in background thread
+            self.ui_thread = self.ui.run_in_thread()
+            time.sleep(0.3)
+            self.ui.log(f"AmonStrike v2.0 started", "+")
+            self.ui.log(f"Target: {self.url}", "i")
+            log("Real-time UI started", "+")
+        except Exception as e:
+            log(f"UI error: {e} — falling back to standard output", "~")
+            self.ui = None
+
+    def _run_nde_engine(self):
+        """Start the Never Dead-End engine in background."""
+        try:
+            from core.nde_engine import NeverDeadEndEngine
+
+            self.nde = NeverDeadEndEngine(
+                self.url,
+                self.session_data,
+                {},
+                self.output_dir
+            )
+
+            # Monkey-patch NDE logging to go through UI
+            original_log = self.nde._log
+            def ui_log(msg, level="*"):
+                original_log(msg, level)
+                if self.ui:
+                    self.ui.log(msg, level, "NDE")
+            self.nde._log = ui_log
+
+            # Monkey-patch NDE add_finding to go through UI
+            original_finding = self.nde.add_finding
+            def ui_finding(*args, **kwargs):
+                f = original_finding(*args, **kwargs)
+                if self.ui and f:
+                    self.ui.add_finding(
+                        f.get("title", ""),
+                        f.get("severity", "INFO"),
+                        f.get("module", "nde"),
+                        f.get("url", "")
+                    )
+                return f
+            self.nde.add_finding = ui_finding
+
+            # Monkey-patch add_node to update UI graph
+            original_node = self.nde.add_node
+            def ui_node(node_type, value, source=None, metadata=None):
+                node = original_node(node_type, value, source, metadata)
+                if self.ui and node:
+                    self.ui.add_graph_node(
+                        node.id, node_type, value, source
+                    )
+                    self.ui.update_stats(nodes=self.nde.stats["nodes_created"])
+                return node
+            self.nde.add_node = ui_node
+
+            # Run NDE in background thread
+            if self.ui:
+                self.ui.update_stats(current_phase="NDE Recon")
+
+            def nde_runner():
+                try:
+                    findings = self.nde.run(self.url)
+                    self.results["nde"] = {"findings": findings, "info": {}}
+                    if self.ui:
+                        self.ui.update_stats(
+                            dead_ends=self.nde.stats["dead_ends_hit"]
+                        )
+                        self.ui.log(
+                            f"NDE complete — {len(findings)} findings, "
+                            f"{self.nde.stats['dead_ends_hit']} dead-ends escaped",
+                            "+"
+                        )
+                except Exception as e:
+                    if self.ui:
+                        self.ui.log(f"NDE error: {e}", "!")
+                    log(f"NDE error: {e}", "!")
+
+            nde_thread = threading.Thread(target=nde_runner, daemon=True)
+            nde_thread.start()
+            log("Never Dead-End Engine started in background", "+")
+
+        except Exception as e:
+            log(f"NDE startup error: {e}", "~")
+
+    def _run_modules(self, modules, tool_status):
+        """Run all scan modules, feeding findings to UI live."""
+        total = len(modules)
+        if self.ui:
+            self.ui.update_stats(current_phase="Module Scanning")
+
+        log(f"Running {total} modules against {self.url}", "+")
+
+        for i, module_name in enumerate(modules, 1):
+            if self._stop.is_set():
+                break
+
+            if self.ui:
+                self.ui.update_stats(
+                    current_phase=f"Module {i}/{total}: {module_name}",
+                    current_tool=module_name
+                )
+                self.ui.log(
+                    f"[{i}/{total}] Running module: {module_name}", "*",
+                    tool=module_name
+                )
+            else:
+                log(f"[{i}/{total}] Running module: {module_name}", "*")
+
+            try:
+                module_result = self._run_single_module(
+                    module_name, tool_status
+                )
+                self.results[module_name] = module_result
+
+                # Feed findings to UI live
+                for finding in module_result.get("findings", []):
+                    if self.ui:
+                        self.ui.add_finding(
+                            finding.get("title", ""),
+                            finding.get("severity", "INFO"),
+                            finding.get("module", module_name),
+                            finding.get("url", self.url)
+                        )
+                        # Add vulnerability nodes to graph
+                        if finding.get("severity") in ["CRITICAL", "HIGH"]:
+                            self.ui.add_graph_node(
+                                f"vuln_{len(self.all_findings)}",
+                                "vulnerability",
+                                finding.get("title", "")[:40],
+                            )
+
+                n_findings = len(module_result.get("findings", []))
+                msg = f"Module {module_name} complete — {n_findings} findings"
+                if self.ui:
+                    self.ui.log(msg, "+" if n_findings else "*",
+                               tool=module_name)
+                else:
+                    log(msg, "+" if n_findings else "*")
+
+            except Exception as e:
+                err_msg = f"Module {module_name} error: {e}"
+                if self.ui:
+                    self.ui.log(err_msg, "!")
+                else:
+                    log(err_msg, "!")
+                self.results[module_name] = {"findings": [], "errors": [str(e)]}
+
+    def _run_single_module(self, name, tool_status):
+        """Load and run a single module."""
+        module_map = {
+            "recon":   ("modules.recon",   "ReconModule"),
+            "headers": ("modules.headers", "HeadersModule"),
+            "sqli":    ("modules.sqli",    "SqliModule"),
+            "xss":     ("modules.xss",     "XssModule"),
+            "csrf":    ("modules.csrf",    "CsrfModule"),
+            "cors":    ("modules.cors",    "CorsModule"),
+            "cookies": ("modules.cookies", "CookiesModule"),
+            "dirs":    ("modules.dirs",    "DirModule"),
+            "lfi":     ("modules.lfi",     "LfiModule"),
+            "ssrf":    ("modules.ssrf",    "SsrfModule"),
+            "idor":    ("modules.idor",    "IdorModule"),
+            "rce":     ("modules.rce",     "RceModule"),
+            "auth":    ("modules.auth",    "AuthModule"),
+            "api":     ("modules.api",     "ApiModule"),
+            "info":    ("modules.info",    "InfoModule"),
+            "ports":   ("modules.ports",   "PortModule"),
+        }
+
+        if name not in module_map:
+            return {"findings": [], "info": {}}
+
+        mod_path, class_name = module_map[name]
+        import importlib
+        mod = importlib.import_module(mod_path)
+        cls = getattr(mod, class_name)
+        instance = cls(self.url, self.session_data)
+        return instance.run()
+
+    def _merge_findings(self):
+        """Merge all findings from all sources."""
+        seen = set()
+        for mod_name, result in self.results.items():
+            for f in result.get("findings", []):
+                key = (f.get("title",""), f.get("url",""))
+                if key not in seen:
+                    seen.add(key)
+                    self.all_findings.append(f)
+
+        # Sort by severity
+        sev_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+        self.all_findings.sort(
+            key=lambda f: sev_order.get(f.get("severity","INFO"), 4)
+        )
+
+        if self.ui:
+            self.ui.update_stats(current_phase="Generating Report")
+            self.ui.log(
+                f"Total findings (deduplicated): {len(self.all_findings)}", "+"
+            )
         else:
-            return
+            log(f"Total findings: {len(self.all_findings)}", "+")
 
-        findings = m.run()
-        results[name] = findings
+    def _generate_report(self, modules):
+        """Generate HTML and PDF reports."""
+        if self.ui:
+            self.ui.log("Generating HTML + PDF report...", "*", "reporter")
+        else:
+            log("Generating report...", "*")
 
-    except ImportError as e:
-        log(f"Module {name} not available: {e}", "~")
-        results[name] = {"error": str(e), "findings": []}
-    except Exception as e:
-        log(f"Module {name} error: {e}", "!")
-        results[name] = {"error": str(e), "findings": []}
+        try:
+            from reports.generator import ReportGenerator
+
+            # Build results dict for report generator
+            report_results = {}
+            for mod in modules:
+                report_results[mod] = self.results.get(mod, {"findings": []})
+
+            gen = ReportGenerator(
+                self.url, modules, report_results,
+                self.session_data, self.output_dir
+            )
+            html_path, pdf_path = gen.generate()
+
+            self.html_report = html_path
+            self.pdf_report  = pdf_path
+
+            if self.ui:
+                self.ui.log(f"HTML report: {html_path}", "+", "reporter")
+                if pdf_path:
+                    self.ui.log(f"PDF report: {pdf_path}", "+", "reporter")
+            else:
+                log(f"HTML report: {html_path}", "+")
+                if pdf_path:
+                    log(f"PDF report: {pdf_path}", "+")
+
+        except Exception as e:
+            log(f"Report generation error: {e}", "!")
+            self.html_report = None
+            self.pdf_report  = None
+
+    def _print_summary(self):
+        """Print final summary to terminal."""
+        if self.ui:
+            self.ui.stop()
+            time.sleep(0.5)
+
+        # Count by severity
+        counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "INFO": 0}
+        for f in self.all_findings:
+            sev = f.get("severity", "INFO")
+            counts[sev] = counts.get(sev, 0) + 1
+
+        risk_score = (counts["CRITICAL"] * 10 + counts["HIGH"] * 7 +
+                      counts["MEDIUM"] * 4 + counts["LOW"] * 1)
+
+        risk_level = (
+            "CRITICAL" if risk_score >= 20 else
+            "HIGH"     if risk_score >= 10 else
+            "MEDIUM"   if risk_score >= 5  else
+            "LOW"      if risk_score >= 1  else
+            "CLEAN"
+        )
+
+        print()
+        print(f"{D}  ════════════════════════════════════════════════════════{X}")
+        print(f"{R}{BLD}  AMONSTRIKE COMPLETE{X}")
+        print(f"{D}  ════════════════════════════════════════════════════════{X}")
+        print()
+        print(f"  {W}Target:{X}       {self.url}")
+        print(f"  {W}Risk Level:{X}   {R if risk_level in ['CRITICAL','HIGH'] else Y}{risk_level}{X}")
+        print(f"  {W}Risk Score:{X}   {risk_score}")
+        print()
+        print(f"  {W}Findings:{X}")
+        print(f"    {R}Critical: {counts['CRITICAL']}{X}  "
+              f"{R}High: {counts['HIGH']}{X}  "
+              f"{Y}Medium: {counts['MEDIUM']}{X}  "
+              f"{G}Low: {counts['LOW']}{X}  "
+              f"{C}Info: {counts['INFO']}{X}")
+        print()
+
+        if self.nde:
+            print(f"  {W}NDE Stats:{X}")
+            print(f"    Nodes processed: {self.nde.stats['nodes_processed']}")
+            print(f"    Dead-ends escaped: {self.nde.stats['dead_ends_hit']}")
+            print(f"    Tools used: {', '.join(self.nde.stats['tools_used']) or 'built-in only'}")
+            print()
+
+        print(f"  {W}Reports:{X}")
+        if self.html_report:
+            print(f"    {C}HTML:{X} {self.html_report}")
+        if self.pdf_report:
+            print(f"    {C}PDF: {X} {self.pdf_report}")
+        print(f"    {C}JSON:{X} {self.output_dir}/findings.json")
+        print()
+
+        # Top findings
+        top = [f for f in self.all_findings
+               if f.get("severity") in ["CRITICAL","HIGH"]][:5]
+        if top:
+            print(f"  {W}Top Findings:{X}")
+            for f in top:
+                sev = f.get("severity","")
+                c = R if sev in ["CRITICAL","HIGH"] else Y
+                print(f"    {c}[{sev}]{X} {f.get('title','')[:60]}")
+            print()
+
+        if self.html_report:
+            print(f"  {D}Open report:{X} firefox {self.html_report}")
+        print(f"{D}  ════════════════════════════════════════════════════════{X}\n")
+
+    def _handle_interrupt(self, sig, frame):
+        """Handle Ctrl+C gracefully."""
+        print(f"\n\n{Y}[~] Interrupted — generating partial report...{X}\n")
+        self._stop.set()
+        if self.ui:
+            self.ui.stop()
+        self._merge_findings()
+        modules = self._resolve_modules()
+        self._generate_report(modules)
+        self._print_summary()
+        sys.exit(0)
+
 
 def main():
-    print(BANNER)
+    parser = argparse.ArgumentParser(
+        description="AmonStrike v2.0 — Never Dead-End Bug Bounty Recon Framework",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Scan Modes:
+  fast    Quick scan — essential checks only (~5 min)
+  normal  Standard scan — all modules (~15 min)  [default]
+  deep    Deep scan — all modules + NDE + tool chaining (~45 min)
+  nde     Never Dead-End autonomous recon
 
-    # Check root
-    if os.geteuid() != 0:
-        print(f"{R}[!]{X} Run with sudo: sudo python3 amonstrike.py")
-        sys.exit(1)
+Examples:
+  sudo python3 amonstrike.py
+  sudo python3 amonstrike.py --url http://192.168.178.149/dvwa
+  sudo python3 amonstrike.py --url http://target.com --mode deep
+  sudo python3 amonstrike.py --url http://target.com --modules sqli,xss,cors
+  sudo python3 amonstrike.py --url http://target.com --no-ui --mode fast
+        """
+    )
 
-    # Parse args
-    parser = argparse.ArgumentParser(description="AmonStrike — Bug Bounty Recon Framework")
-    parser.add_argument("--url", help="Target URL")
-    parser.add_argument("--modules", help="Modules to run (comma-separated or 'all')")
-    parser.add_argument("--output", help="Output directory", default="output")
-    parser.add_argument("--threads", help="Number of threads", type=int, default=5)
-    parser.add_argument("--timeout", help="Request timeout (seconds)", type=int, default=10)
-    parser.add_argument("--proxy", help="Proxy URL (e.g. http://127.0.0.1:8080)")
-    parser.add_argument("--cookies", help="Cookies string")
-    parser.add_argument("--headers", help="Extra headers JSON string")
-    parser.add_argument("--wordlist", help="Custom wordlist for dir enumeration")
+    parser.add_argument("--url",      help="Target URL")
+    parser.add_argument("--mode",     default="normal",
+                        choices=["fast","normal","deep","nde"],
+                        help="Scan mode (default: normal)")
+    parser.add_argument("--modules",  help="Specific modules (comma-separated or 'all')")
+    parser.add_argument("--no-ui",    action="store_true",
+                        help="Disable real-time console UI")
+    parser.add_argument("--no-nde",   action="store_true",
+                        help="Disable Never Dead-End engine")
+    parser.add_argument("--timeout",  type=int, default=10,
+                        help="Request timeout in seconds (default: 10)")
+    parser.add_argument("--threads",  type=int, default=10,
+                        help="Number of threads (default: 10)")
+    parser.add_argument("--proxy",    help="Proxy URL (e.g. http://127.0.0.1:8080)")
+    parser.add_argument("--cookies",  help="Cookie string")
+    parser.add_argument("--headers",  help="Extra headers as JSON string")
+    parser.add_argument("--wordlist", help="Custom wordlist for directory enumeration")
+    parser.add_argument("--output",   help="Output directory (default: output/)")
+
     args = parser.parse_args()
 
-    # Get target URL
-    if args.url:
-        url = validate_url(args.url)
-        if not url:
-            print(f"{R}[!]{X} Invalid URL: {args.url}")
-            sys.exit(1)
-    else:
-        print(f"{D}  Configure your scan:{X}\n")
-        raw_url = get_input("  Target URL")
-        url = validate_url(raw_url)
-        if not url:
-            print(f"{R}[!]{X} Invalid URL")
-            sys.exit(1)
+    scanner = AmonStrike(args)
+    scanner.run()
 
-    # Get modules
-    if args.modules:
-        if args.modules.lower() == "all":
-            modules = list(MODULES.keys())
-        else:
-            modules = [m.strip() for m in args.modules.split(",") if m.strip() in MODULES]
-    else:
-        modules = select_modules()
-
-    # Session data shared across modules
-    session_data = {
-        "url":      url,
-        "parsed":   urlparse(url),
-        "timeout":  args.timeout,
-        "threads":  args.threads,
-        "proxy":    {"http": args.proxy, "https": args.proxy} if args.proxy else None,
-        "cookies":  args.cookies or "",
-        "headers":  json.loads(args.headers) if args.headers else {},
-        "wordlist": args.wordlist,
-        "start_time": datetime.now().isoformat(),
-    }
-
-    # Output directory
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    parsed = urlparse(url)
-    safe_host = parsed.netloc.replace(":", "_").replace(".", "_")
-    output_dir = os.path.join(args.output, f"{safe_host}_{ts}")
-    os.makedirs(output_dir, exist_ok=True)
-    session_data["output_dir"] = output_dir
-
-    print_summary(url, modules, output_dir)
-
-    confirm = input(f"  {W}Start scan? (Enter to continue / Ctrl+C to cancel){X}: ")
-    print()
-
-    # ── Run modules ──────────────────────────────────────────
-    results = {}
-    total = len(modules)
-
-    log(f"Starting AmonStrike against {R}{url}{X}", "+")
-    log(f"Running {total} modules — {', '.join(modules)}", "i")
-    print()
-
-    for i, module in enumerate(modules, 1):
-        log(f"[{i}/{total}] Running module: {R}{module}{X} — {D}{MODULES.get(module, '')}{X}", "*")
-        run_module(module, url, session_data, results)
-
-    print()
-    log("All modules complete — generating report", "+")
-
-    # ── Generate report ──────────────────────────────────────
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from reports.generator import ReportGenerator
-
-    gen = ReportGenerator(url, modules, results, session_data, output_dir)
-    html_path, pdf_path = gen.generate()
-
-    # ── Summary ──────────────────────────────────────────────
-    print()
-    print(f"{D}  ════════════════════════════════════════════════════════{X}")
-    print(f"{R}{BLD}  AMONSTRIKE COMPLETE{X}")
-    print(f"{D}  ════════════════════════════════════════════════════════{X}")
-
-    # Count findings by severity
-    critical = high = medium = low = info_count = 0
-    for mod_results in results.values():
-        for finding in mod_results.get("findings", []):
-            sev = finding.get("severity", "").upper()
-            if sev == "CRITICAL": critical += 1
-            elif sev == "HIGH": high += 1
-            elif sev == "MEDIUM": medium += 1
-            elif sev == "LOW": low += 1
-            elif sev == "INFO": info_count += 1
-
-    print(f"\n  {W}Findings Summary:{X}")
-    print(f"  {R}Critical: {critical}{X}  {R}High: {high}{X}  {Y}Medium: {medium}{X}  {G}Low: {low}{X}  {D}Info: {info_count}{X}")
-    print(f"\n  {W}Reports:{X}")
-    print(f"  {C}HTML:{X} {html_path}")
-    if pdf_path:
-        print(f"  {C}PDF: {X} {pdf_path}")
-    print(f"\n  {D}Open report: firefox {html_path}{X}")
-    print(f"{D}  ════════════════════════════════════════════════════════{X}\n")
 
 if __name__ == "__main__":
     main()
