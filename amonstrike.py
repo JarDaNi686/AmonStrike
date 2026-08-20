@@ -80,6 +80,7 @@ ALL_MODULES = [
     "recon", "headers", "sqli", "xss", "csrf", "cors",
     "cookies", "dirs", "lfi", "ssrf", "idor", "rce",
     "auth", "api", "info", "ports",
+    "osint", "waf", "takeover", "credentials",
 ]
 
 def log(msg, level="*"):
@@ -485,7 +486,11 @@ class AmonStrike:
             "auth":    ("modules.auth",    "AuthModule"),
             "api":     ("modules.api",     "ApiModule"),
             "info":    ("modules.info",    "InfoModule"),
-            "ports":   ("modules.ports",   "PortModule"),
+            "ports":       ("modules.ports",       "PortModule"),
+            "osint":       ("modules.osint",       "OsintModule"),
+            "waf":         ("modules.waf",         "WafModule"),
+            "takeover":    ("modules.takeover",    "TakeoverModule"),
+            "credentials": ("modules.credentials", "CredentialModule"),
         }
 
         if name not in module_map:
