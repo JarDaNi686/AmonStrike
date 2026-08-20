@@ -81,6 +81,8 @@ ALL_MODULES = [
     "cookies", "dirs", "lfi", "ssrf", "idor", "rce",
     "auth", "api", "info", "ports",
     "osint", "waf", "takeover", "credentials",
+    "ssti", "jwt_deep", "race_condition",
+    "http_smuggling", "xxe",
 ]
 
 def log(msg, level="*"):
@@ -491,6 +493,11 @@ class AmonStrike:
             "waf":         ("modules.waf",         "WafModule"),
             "takeover":    ("modules.takeover",    "TakeoverModule"),
             "credentials": ("modules.credentials", "CredentialModule"),
+            "ssti":        ("modules.ssti",        "SstiModule"),
+            "jwt_deep":    ("modules.jwt_deep",    "JwtDeepModule"),
+            "race_condition":("modules.race_condition","RaceConditionModule"),
+            "http_smuggling":("modules.http_smuggling","HttpSmugglingModule"),
+            "xxe":         ("modules.xxe",         "XxeModule"),
         }
 
         if name not in module_map:
