@@ -31,6 +31,9 @@ from urllib.parse import urlparse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from core.config import Config
 from core.shell_manager import ShellManager, ProfessionalUI
+from core.auth_engine import ScanAuthEngine
+from core.endpoint_distributor import EndpointDistributor, ToolIntegrator
+from core.scan_state import ScanState
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -207,11 +210,59 @@ class AmonStrike:
 
         # Print mission brief
         self._print_brief(modules)
+        # Check for resumable scan
+        self._scan_state = ScanState(self.url, modules)
+        if self._scan_state.has_prior_state():
+            remaining = self._scan_state.remaining_modules()
+            summary   = self._scan_state.summary()
+            print(f"\n  {Y}[~] Resumable scan found: {summary}{X}")
+            choice = input(f"  {W}Resume? (y=resume, n=restart, Enter=resume):{X} ").strip().lower()
+            if choice == "n":
+                self._scan_state.clear()
+                print(f"  {G}[+] Starting fresh scan{X}")
+            else:
+                modules = remaining
+                print(f"  {G}[+] Resuming — {len(modules)} modules remaining{X}")
+                # Restore previous findings
+                for mod in [m for m in self._scan_state._state["completed"]]:
+                    self.results[mod] = self._scan_state.get_saved_result(mod)
+
         confirm = input(f"\n  {W}Start? (Enter to continue / Ctrl+C to cancel){X}: ")
         print()
 
         # Setup signal handler
         signal.signal(signal.SIGINT, self._handle_interrupt)
+
+        # Phase 0.8: Authentication engine
+        self._auth_engine = None
+        creds_raw = getattr(self.args, "credentials", None)
+        if creds_raw:
+            try:
+                creds = json.loads(creds_raw) if isinstance(creds_raw, str) else creds_raw
+                self._auth_engine = ScanAuthEngine(self.url, timeout=self.args.timeout)
+                for cred in creds:
+                    self._auth_engine.add_credential(
+                        cred.get("username",""),
+                        cred.get("password",""),
+                        cred.get("role","user"),
+                    )
+                log("Logging in with provided credentials...", "*")
+                login_results = self._auth_engine.login_all()
+                logged_in = sum(1 for r in login_results.values() if r.get("success"))
+                log(f"Authenticated: {logged_in}/{len(creds)} accounts", "+")
+                if logged_in:
+                    # Update session_data with auth
+                    self.session_data["cookies"] = self._auth_engine.cookies_for_module()
+                    self.session_data["headers"] = {
+                        **self.session_data.get("headers",{}),
+                        **self._auth_engine.headers_for_module()
+                    }
+            except Exception as e:
+                log(f"Auth setup error: {e}", "!")
+
+        # Phase 0.9: Endpoint distributor
+        self._endpoint_dist = EndpointDistributor(self.url)
+        self._tool_integrator = ToolIntegrator(str(self.output_dir) + "/tools")
 
         # Phase 1: Auto-install tools
         tool_status = self._run_installer(modules)
@@ -238,6 +289,18 @@ class AmonStrike:
         if self.ui:
             self.ui.stop()
             time.sleep(0.5)
+
+        # Phase 5.5: Feed discovered endpoints to distributor
+        for mod_name in ["recon","dirs","osint"]:
+            mod_result = self.results.get(mod_name, {})
+            info = mod_result.get("info", {})
+            for key in ["endpoints","urls","paths","discovered_paths"]:
+                endpoints = info.get(key, [])
+                if endpoints:
+                    self._endpoint_dist.add_endpoints(endpoints)
+        
+        if self._endpoint_dist.get_all_endpoints():
+            log(f"Endpoint distributor: {self._endpoint_dist.stats()['total']} endpoints for re-testing", "i")
 
         # Phase 6: Merge all findings
         self._merge_findings()
@@ -614,6 +677,12 @@ class AmonStrike:
         except Exception:
             pass
 
+        # Save state for resume capability
+        try:
+            if hasattr(self, "_scan_state"):
+                self._scan_state.mark_complete(name, result)
+        except Exception:
+            pass
         return result
 
     def _merge_findings(self):
@@ -641,42 +710,54 @@ class AmonStrike:
             log(f"Total findings: {len(self.all_findings)}", "+")
 
     def _generate_report(self, modules):
-        """Generate HTML and PDF reports."""
-        if self.ui:
-            self.ui.log("Generating HTML + PDF report...", "*", "reporter")
-        else:
-            log("Generating report...", "*")
-
+        """Generate professional HTML + JSON + Markdown reports."""
+        log("Generating reports...", "*")
         try:
             from reports.generator import ReportGenerator
+            import time as _time
 
-            # Build results dict for report generator
-            report_results = {}
-            for mod in modules:
-                report_results[mod] = self.results.get(mod, {"findings": []})
+            scan_id = getattr(self, "_scan_id",
+                f"{int(_time.time())}_{self.url.split('//')[-1].split('/')[0]}")
+            gen = ReportGenerator(scan_id, self.url, str(self.output_dir))
 
-            gen = ReportGenerator(
-                self.url, modules, report_results,
-                self.session_data, self.output_dir
-            )
-            html_path, pdf_path = gen.generate()
+            for mod_result in self.results.values():
+                if isinstance(mod_result, dict):
+                    gen.add_findings(mod_result.get("findings", []))
 
-            self.html_report = html_path
-            self.pdf_report  = pdf_path
+            for chain in getattr(self, "_chains", []):
+                gen.add_chain(chain)
 
-            if self.ui:
-                self.ui.log(f"HTML report: {html_path}", "+", "reporter")
-                if pdf_path:
-                    self.ui.log(f"PDF report: {pdf_path}", "+", "reporter")
-            else:
-                log(f"HTML report: {html_path}", "+")
-                if pdf_path:
-                    log(f"PDF report: {pdf_path}", "+")
+            paths = gen.generate_all()
+            self.html_report = paths.get("html", "")
+            self.pdf_report  = None
+            self.json_report = paths.get("json", "")
+            self.md_report   = paths.get("md",   "")
+
+            log(f"HTML report: {self.html_report}", "+")
+            log(f"JSON report: {self.json_report}", "+")
+            self._notify_slack()
 
         except Exception as e:
-            log(f"Report generation error: {e}", "!")
+            import traceback
+            log(f"Report error: {e}", "!")
             self.html_report = None
-            self.pdf_report  = None
+
+    def _notify_slack(self):
+        """Send Slack/webhook notification on CRITICAL findings."""
+        try:
+            webhook = self.config.get("output","slack_webhook") if hasattr(self,"config") else ""
+            if not webhook:
+                return
+            crits = [f for f in self.all_findings if f.get("severity")=="CRITICAL"]
+            if not crits:
+                return
+            import requests as _req
+            text = (f"*AmonStrike CRITICAL findings on {self.url}*\n"
+                    + "\n".join(f"* {f.get('title','')}" for f in crits[:5]))
+            _req.post(webhook, json={"text": text}, timeout=5)
+            log("Slack notification sent", "+")
+        except Exception:
+            pass
 
     def _print_summary(self):
         """Print final summary to terminal."""

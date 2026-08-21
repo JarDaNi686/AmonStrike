@@ -255,3 +255,32 @@ class SqliModule(BaseModule):
                         cve="CWE-89"
                     )
                     break
+
+
+    def _test_endpoint_url(self, url: str):
+        """Test a specific discovered URL for SQLi."""
+        import re as _re
+        # Find parameters in URL
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query)
+        for param in params:
+            for payload in self.PAYLOADS[:8]:
+                test_params = dict(params)
+                test_params[param] = [payload]
+                from urllib.parse import urlencode
+                test_url = url.split("?")[0] + "?" + urlencode({k:v[0] for k,v in test_params.items()})
+                try:
+                    r = self.session.get(test_url, timeout=self.timeout, verify=False)
+                    if r and self._is_sqli(r.text):
+                        self.add_finding(
+                            title=f"SQL Injection — {param} @ {parsed.path}",
+                            severity="CRITICAL",
+                            description=f"SQLi confirmed in parameter '{param}' at {url}",
+                            evidence=f"URL: {test_url}\nPayload: {payload}\n{self._extract_error(r.text)}",
+                            remediation="Use prepared statements.",
+                            url=test_url, parameter=param, payload=payload, cve="CWE-89",
+                        )
+                        return
+                except Exception:
+                    pass

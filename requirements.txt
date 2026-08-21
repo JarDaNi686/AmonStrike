@@ -1,12 +1,51 @@
-# Install with: pip3 install --break-system-packages -r requirements.txt
+# AmonStrike v6.0 — Complete requirements
+# Install: pip3 install --break-system-packages -r requirements.txt
+
+# Core HTTP
 requests>=2.28
+urllib3>=2.0
+aiohttp>=3.8
+
+# HTML parsing
 beautifulsoup4>=4.11
-flask>=2.3
-Pillow>=9.0
-PyYAML>=6.0
 lxml>=4.9
+
+# Web framework (dashboard)
+flask>=2.3
+flask-cors>=4.0
+
+# Images / screenshots
+Pillow>=9.0
+playwright>=1.30
+
+# Config
+PyYAML>=6.0
+
+# DNS
 dnspython>=2.3
 tldextract>=3.4
-playwright>=1.30
-aiohttp>=3.8
+
+# WebSocket testing
+websocket-client>=1.6
+
+# Favicon hashing (WAF bypass / origin discovery)
+mmh3>=3.0
+
+# Async
 websockets>=11.0
+
+# Crypto (JWT analysis)
+pyjwt>=2.8
+cryptography>=41.0
+
+# Data
+jinja2>=3.1
+
+# Optional: faster scanning
+# masscan   — install via apt
+# naabu     — go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
+# subfinder — go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+# httpx     — go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+# nuclei    — go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+# dalfox    — go install github.com/hahwul/dalfox/v2@latest
+# sqlmap    — apt install sqlmap
