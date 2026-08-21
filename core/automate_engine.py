@@ -316,26 +316,27 @@ class AuthenticatedCrawler:
         print(f"\n  [*] Authenticated crawl starting: {self.base_url}")
         print(f"      Max pages: {self.max_pages}")
 
-        # Try Playwright first (handles JS) — skip if chromium not installed
+        # Playwright (JS crawling) — only if explicitly available
+        # Skip entirely if nodejs/chromium not installed (common on Kali)
+        _use_playwright = False
         try:
-            from playwright.sync_api import sync_playwright as _sp
             import shutil as _sh
-            # Check if chromium binary actually exists before trying
-            _test = _sp()
-            _b = _test.__enter__()
-            _browser_path = _b.chromium.executable_path
-            _test.__exit__(None, None, None)
-            if not _sh.os.path.exists(_browser_path):
-                raise FileNotFoundError(f"Chromium not found at {_browser_path}")
-            captured = self._crawl_playwright()
-            if captured:
-                print(f"  [+] Playwright crawl: {len(captured)} requests captured")
-                return captured
-        except FileNotFoundError as e:
-            print(f"  [~] Chromium not installed — fix: sudo playwright install chromium")
-            print(f"  [~] Falling back to requests crawler")
-        except Exception as e:
-            print(f"  [~] Playwright unavailable ({type(e).__name__}) — using requests crawler")
+            import importlib.util as _iu
+            if (_sh.which("node") and
+                    _iu.find_spec("playwright") and
+                    os.environ.get("AMONSTRIKE_PLAYWRIGHT","") == "1"):
+                _use_playwright = True
+        except Exception:
+            pass
+
+        if _use_playwright:
+            try:
+                captured = self._crawl_playwright()
+                if captured:
+                    print(f"  [+] Playwright crawl: {len(captured)} requests captured")
+                    return captured
+            except Exception as e:
+                print(f"  [~] Playwright failed ({type(e).__name__}) — using requests crawler")
 
         # Fallback: requests-based crawler
         captured = self._crawl_requests()
