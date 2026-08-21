@@ -263,7 +263,7 @@ class ReconModule(BaseModule):
                 self.add_finding(
                     title="Sensitive Paths in robots.txt",
                     severity="INFO",
-                    description="robots.txt reveals potentially sensitive paths that should not be publicly disclosed.",
+                    description="robots.txt reveals sensitive paths that should not be publicly disclosed.",
                     evidence="Disallow entries:\n" + "\n".join(interesting),
                     remediation="Do not rely on robots.txt for security. Protect sensitive paths with proper authentication.",
                     url=self.url + "/robots.txt"
@@ -329,7 +329,7 @@ class ReconModule(BaseModule):
                 self.add_finding(
                     title=f"Sensitive File Exposed: {name}",
                     severity=severity,
-                    description=f"Sensitive file {path} is publicly accessible and may expose credentials or configuration.",
+                    description=f"Sensitive file {path} is publicly accessible and is publicly accessible — download and inspect for credentials, tokens, DB connection strings, and internal paths.",
                     evidence=f"GET {self.url}{path} → {r.status_code}\n{r.text[:200]}",
                     remediation=f"Restrict access to {path} via web server configuration. Remove the file if not needed.",
                     url=self.url + path

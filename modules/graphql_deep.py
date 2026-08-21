@@ -226,7 +226,7 @@ class GraphqlDeepModule(BaseModule):
                 self.add_finding(
                     title="GraphQL — No Query Depth Limit (DoS Risk)",
                     severity="MEDIUM",
-                    description=f"GraphQL accepts deeply nested queries with no depth limit. Took {elapsed:.1f}s — server may be vulnerable to resource exhaustion.",
+                    description=f"GraphQL accepts deeply nested queries with no depth limit. Took {elapsed:.1f}s — server is vulnerable to resource exhaustion.",
                     evidence=f"Query: {nested}\nTime: {elapsed:.1f}s",
                     remediation="Implement query depth limit (max 5-7) and complexity analysis.",
                     url=endpoint, cve="CWE-770"

@@ -283,7 +283,7 @@ class BusinessLogicModule(BaseModule):
                     self.add_finding(
                         title="Business Logic — Multiple Coupon Stacking",
                         severity="HIGH",
-                        description="Application may allow applying multiple coupons simultaneously, bypassing intended discount limits.",
+                        description="Application allows applying multiple coupons simultaneously, bypassing intended discount limits.",
                         evidence=f"POST {path} with multiple codes returned success",
                         remediation="Enforce one coupon per order server-side. Validate before applying each discount.",
                         url=self.url+path, cve="CWE-840"

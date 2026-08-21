@@ -87,7 +87,7 @@ class CookiesModule(BaseModule):
                     self.add_finding(
                         title=f"Session/Auth Cookie Inadequately Protected: {name}",
                         severity="HIGH",
-                        description=f"Cookie '{name}' appears to be a session or auth cookie but is missing security flags.",
+                        description=f"Cookie '{name}' is a session or auth cookie but is missing security flags.",
                         evidence=f"Cookie name: {name}\nHttpOnly: {flags['httponly']}\nSecure: {flags['secure']}\nSameSite: {flags['samesite']}",
                         remediation="Always set HttpOnly and Secure flags on session and authentication cookies.",
                         url=self.url,

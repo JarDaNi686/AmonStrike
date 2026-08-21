@@ -90,6 +90,7 @@ ALL_MODULES = [
     "graphql_deep", "oauth", "business_logic",
     "cache_poison", "deserialization",
     "open_redirect", "rate_limit", "twofa_bypass",
+    "file_upload", "nosql_injection", "clickjacking", "ssl_tls", "error_disclosure", "vhost_enum", "command_injection", "session_fixation", "email_injection", "formula_injection", "account_takeover", "csp_bypass", "firebase", "websocket", "parameter_pollution", "timing_attack", "saml_bypass", "prototype_pollution",
 ]
 
 def log(msg, level="*"):
@@ -528,6 +529,24 @@ class AmonStrike:
             "open_redirect":   ("modules.open_redirect",   "OpenRedirectModule"),
             "rate_limit":      ("modules.rate_limit",       "RateLimitModule"),
             "twofa_bypass":    ("modules.twofa_bypass",     "TwofaBypassModule"),
+            "file_upload": ("modules.file_upload", "FileUploadModule"),
+            "nosql_injection": ("modules.nosql_injection", "NosqlInjectionModule"),
+            "clickjacking": ("modules.clickjacking", "ClickjackingModule"),
+            "ssl_tls": ("modules.ssl_tls", "SslTlsModule"),
+            "error_disclosure": ("modules.error_disclosure", "ErrorDisclosureModule"),
+            "vhost_enum": ("modules.vhost_enum", "VhostEnumModule"),
+            "command_injection": ("modules.command_injection", "CommandInjectionModule"),
+            "session_fixation": ("modules.session_fixation", "SessionFixationModule"),
+            "email_injection": ("modules.email_injection", "EmailInjectionModule"),
+            "formula_injection": ("modules.formula_injection", "FormulaInjectionModule"),
+            "account_takeover": ("modules.account_takeover", "AccountTakeoverModule"),
+            "csp_bypass": ("modules.csp_bypass", "CspBypassModule"),
+            "firebase": ("modules.firebase", "FirebaseModule"),
+            "websocket": ("modules.websocket", "WebsocketModule"),
+            "parameter_pollution": ("modules.parameter_pollution", "ParameterPollutionModule"),
+            "timing_attack": ("modules.timing_attack", "TimingAttackModule"),
+            "saml_bypass": ("modules.saml_bypass", "SamlBypassModule"),
+            "prototype_pollution": ("modules.prototype_pollution", "PrototypePollutionModule"),
         }
 
         if name not in module_map:

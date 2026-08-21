@@ -36,7 +36,7 @@ class InfoModule(BaseModule):
             self.add_finding(
                 title="Sensitive Information in HTML Comments",
                 severity="MEDIUM",
-                description=f"HTML comments contain potentially sensitive information ({len(sensitive_comments)} found).",
+                description=f"HTML comments contain sensitive information ({len(sensitive_comments)} found).",
                 evidence="Sensitive comments:\n" + "\n---\n".join(sensitive_comments[:3]),
                 remediation="Remove all HTML comments from production code. Use version control for tracking changes.",
                 url=self.url,

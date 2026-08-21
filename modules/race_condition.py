@@ -191,7 +191,7 @@ class RaceConditionModule(BaseModule):
                 self.add_finding(
                     title=f"Race Condition — Potential Double Spend at {path}",
                     severity="CRITICAL",
-                    description=f"Multiple simultaneous transfer requests to {path} all succeeded. This may allow double-spending or balance manipulation.",
+                    description=f"Multiple simultaneous transfer requests to {path} all succeeded. This allows double-spending or balance manipulation.",
                     evidence=f"Path: {path}\n{len(successes)} simultaneous transfers returned 200",
                     remediation="Use atomic database transactions. Implement idempotency keys. Add balance check inside transaction.",
                     url=self.url + path,
