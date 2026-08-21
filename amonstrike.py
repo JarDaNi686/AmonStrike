@@ -89,6 +89,7 @@ ALL_MODULES = [
     "race_condition", "http_smuggling", "xxe",
     "graphql_deep", "oauth", "business_logic",
     "cache_poison", "deserialization",
+    "open_redirect", "rate_limit", "twofa_bypass",
 ]
 
 def log(msg, level="*"):
@@ -524,6 +525,9 @@ class AmonStrike:
             "business_logic":  ("modules.business_logic",  "BusinessLogicModule"),
             "cache_poison":    ("modules.cache_poison",    "CachePoisonModule"),
             "deserialization": ("modules.deserialization", "DeserializationModule"),
+            "open_redirect":   ("modules.open_redirect",   "OpenRedirectModule"),
+            "rate_limit":      ("modules.rate_limit",       "RateLimitModule"),
+            "twofa_bypass":    ("modules.twofa_bypass",     "TwofaBypassModule"),
         }
 
         if name not in module_map:
@@ -531,10 +535,67 @@ class AmonStrike:
 
         mod_path, class_name = module_map[name]
         import importlib
-        mod = importlib.import_module(mod_path)
-        cls = getattr(mod, class_name)
-        instance = cls(self.url, self.session_data)
-        return instance.run()
+        mod    = importlib.import_module(mod_path)
+        cls    = getattr(mod, class_name)
+
+        # Build kwargs - pass everything the module needs
+        kwargs = {
+            "url":              self.url,
+            "timeout":          getattr(self.args, "timeout", 10),
+            "cookies":          self._parse_cookies(),
+            "headers":          self._parse_headers(),
+            "proxy":            getattr(self.args, "proxy", None),
+            "scope_validator":  getattr(self, "_scope_validator", None),
+            "bypass_headers":   tool_status.get("bypass_headers", {}),
+        }
+
+        # Add extra endpoints from recon if available
+        recon_data = self.results.get("recon", {})
+        if recon_data.get("endpoints"):
+            kwargs["extra_endpoints"] = recon_data["endpoints"]
+        if recon_data.get("forms"):
+            kwargs["extra_forms"] = recon_data["forms"]
+
+        try:
+            instance = cls(**kwargs)
+        except TypeError:
+            # Fallback: old-style init
+            instance = cls(self.url, timeout=kwargs["timeout"],
+                          cookies=kwargs["cookies"],
+                          headers=kwargs["headers"])
+
+        result = instance.run()
+
+        # Save findings to database immediately
+        try:
+            if hasattr(self, "_db") and self._db:
+                for finding in result.get("findings", []):
+                    self._db.save_finding(
+                        self._scan_id,
+                        finding.get("title", ""),
+                        finding.get("severity", "INFO"),
+                        finding.get("url", self.url),
+                        finding.get("module", name),
+                        finding.get("description", ""),
+                        finding.get("evidence", ""),
+                        finding.get("remediation", ""),
+                        finding.get("payload", ""),
+                        finding.get("parameter", ""),
+                    )
+        except Exception:
+            pass
+
+        # Update ProfessionalUI
+        try:
+            if hasattr(self, "pro_ui") and self.pro_ui:
+                self.pro_ui.update_module(name)
+                for finding in result.get("findings", []):
+                    self.pro_ui.alert(finding)
+                    self.pro_ui.finding_added(finding)
+        except Exception:
+            pass
+
+        return result
 
     def _merge_findings(self):
         """Merge all findings from all sources."""

