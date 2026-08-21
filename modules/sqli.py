@@ -166,7 +166,7 @@ class SqliModule(BaseModule):
 
     def _test_single_param(self, param, original_value):
         """Test a single parameter with all payloads."""
-        for payload in self.PAYLOADS[:5]:  # Fast mode: 5 payloads, escalate on hit
+        for payload in self.PAYLOADS[:10]:  # Limit to first 10 for speed
             test_value = original_value + payload
             resp = self.get(params={param: test_value})
             if not resp:

@@ -41,7 +41,7 @@ class BaseModule:
     DESCRIPTION = "Base module — do not use directly"
 
     # Default rate limit: requests per second
-    RATE_LIMIT  = 30   # requests/sec — 3x faster than original
+    RATE_LIMIT  = 10
     MAX_RETRIES = 2
     RETRY_DELAY = 0.5  # seconds, doubles each retry
 
