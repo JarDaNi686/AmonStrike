@@ -42,6 +42,17 @@ class SqliModule(BaseModule):
         (r"Unclosed quotation mark", "Generic SQL"),
         (r"quoted string not properly terminated", "Generic SQL"),
         (r"SQL syntax.*MySQL", "Generic SQL"),
+        # SQLite (what testphp actually uses)
+        (r"unrecognized token", "SQLite"),
+        (r"near.*syntax error", "SQLite"),
+        (r"sqlite3.OperationalError", "SQLite"),
+        # PHP mysql functions (old style)
+        (r"mysql_fetch_array", "MySQL-PHP"),
+        (r"mysql_fetch_assoc", "MySQL-PHP"),
+        (r"mysql_num_rows", "MySQL-PHP"),
+        (r"supplied argument is not a valid MySQL", "MySQL-PHP"),
+        (r"Column count doesn", "MySQL"),
+        (r"The used SELECT statements have", "MySQL"),
     ]
 
     # Basic SQLi payloads
@@ -102,6 +113,9 @@ class SqliModule(BaseModule):
         # Test headers
         self._test_headers()
 
+        # Test extra endpoints from recon (each page's params)
+        self._test_extra_endpoints()
+
         self.log(f"SQLi scan complete — {len(self.findings)} findings", "+")
         return self.result()
 
@@ -113,23 +127,46 @@ class SqliModule(BaseModule):
         return None
 
     def _test_url_params(self):
-        """Test URL query parameters for SQLi."""
+        """Test URL query parameters for SQLi.
+        Priority: 1) URL params if present, 2) spidered links, 3) common params
+        """
         parsed = urlparse(self.url)
-        if not parsed.query:
-            # Try common parameter names
-            test_params = ["id", "page", "cat", "user", "name", "search", "q", "item"]
-            for param in test_params:
-                self._test_single_param(param, "1")
-            return
 
-        params = parse_qs(parsed.query)
-        for param, values in params.items():
-            original = values[0]
-            self._test_single_param(param, original)
+        if parsed.query:
+            # URL already has params — test those first
+            params = parse_qs(parsed.query)
+            for param, values in params.items():
+                self._test_single_param(param, values[0])
+                if self.findings: return
+        
+        # Spider homepage for links with params — these are the real endpoints
+        resp = self.get("")
+        if resp:
+            import re as _re
+            links = _re.findall(r'href=["\'"]([^"\'#]+\?[^"\'#]+)["\'"]', resp.text)
+            for link in links[:20]:
+                if link.startswith("/"): 
+                    link = f"{self.parsed.scheme}://{self.parsed.netloc}{link}"
+                p2 = urlparse(link)
+                params2 = parse_qs(p2.query)
+                for param, values in params2.items():
+                    # Temporarily adjust URL for this page
+                    saved = self.url
+                    self.url = f"{p2.scheme}://{p2.netloc}{p2.path}"
+                    self._test_single_param(param, values[0])
+                    self.url = saved
+                    if self.findings: return
+        
+        # Fallback: common params on base URL
+        if not self.findings:
+            for param in ["id", "cat", "artist", "page", "q", "search", "item",
+                          "user", "name", "product", "news", "order", "record"]:
+                self._test_single_param(param, "1")
+                if self.findings: return
 
     def _test_single_param(self, param, original_value):
         """Test a single parameter with all payloads."""
-        for payload in self.PAYLOADS[:10]:  # Limit to first 10 for speed
+        for payload in self.PAYLOADS[:5]:  # Fast mode: 5 payloads, escalate on hit
             test_value = original_value + payload
             resp = self.get(params={param: test_value})
             if not resp:
@@ -256,6 +293,46 @@ class SqliModule(BaseModule):
                     )
                     break
 
+
+    def _test_extra_endpoints(self):
+        """Crawl the app and test every discovered URL with params."""
+        from urllib.parse import urlparse, parse_qs
+        
+        # First, spider the base URL for links
+        r = self.get("")
+        if not r:
+            return
+        
+        import re
+        # Find all links with query parameters
+        links = re.findall(r'href=["\']((?:/|http)[^\s"\'#]+\?[^\s"\'#]+)["\'"]', r.text)
+        links += getattr(self, "extra_endpoints", [])
+        
+        seen = set()
+        for link in links[:30]:
+            # Build absolute URL
+            if link.startswith("/"):
+                link = f"{self.parsed.scheme}://{self.parsed.netloc}{link}"
+            
+            parsed = urlparse(link)
+            params = parse_qs(parsed.query)
+            
+            # Key = path + sorted param names (dedup same params diff values)
+            key = parsed.path + "|" + ",".join(sorted(params.keys()))
+            if key in seen:
+                continue
+            seen.add(key)
+            
+            # Test each param on this URL
+            for param, values in params.items():
+                original = values[0]
+                # Temporarily set base URL to this path for testing
+                old_url = self.url
+                self.url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+                self._test_single_param(param, original)
+                self.url = old_url
+                if self.findings:
+                    break  # Found one on this page
 
     def _test_endpoint_url(self, url: str):
         """Test a specific discovered URL for SQLi."""

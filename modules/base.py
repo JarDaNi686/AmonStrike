@@ -41,9 +41,9 @@ class BaseModule:
     DESCRIPTION = "Base module — do not use directly"
 
     # Default rate limit: requests per second
-    RATE_LIMIT  = 10
-    MAX_RETRIES = 3
-    RETRY_DELAY = 1.5  # seconds, doubles each retry
+    RATE_LIMIT  = 30   # requests/sec — 3x faster than original
+    MAX_RETRIES = 2
+    RETRY_DELAY = 0.5  # seconds, doubles each retry
 
     def __init__(self, url: str, timeout: int = 10,
                  cookies: dict = None, headers: dict = None,
