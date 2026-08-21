@@ -88,3 +88,15 @@
 2026-08-20 21:36:18,256 [INFO] Job queued: [9] http://low.com (normal)
 2026-08-20 21:36:18,256 [INFO] Job queued: [5] https://testco.com (normal)
 2026-08-20 21:36:18,256 [INFO] Added 1 targets for TestCo
+2026-08-21 07:29:35,594 [INFO] Job queued: [5] http://test.com (normal)
+2026-08-21 07:29:35,595 [INFO] Job queued: [3] http://testjob.com (normal)
+2026-08-21 07:29:35,596 [INFO] Job queued: [1] http://high.com (normal)
+2026-08-21 07:29:35,596 [INFO] Job queued: [9] http://low.com (normal)
+2026-08-21 07:29:35,596 [INFO] Job queued: [5] https://testco.com (normal)
+2026-08-21 07:29:35,596 [INFO] Added 1 targets for TestCo
+2026-08-21 07:35:42,806 [INFO] Job queued: [5] http://test.com (normal)
+2026-08-21 07:35:42,806 [INFO] Job queued: [3] http://testjob.com (normal)
+2026-08-21 07:35:42,806 [INFO] Job queued: [1] http://high.com (normal)
+2026-08-21 07:35:42,807 [INFO] Job queued: [9] http://low.com (normal)
+2026-08-21 07:35:42,807 [INFO] Job queued: [5] https://testco.com (normal)
+2026-08-21 07:35:42,807 [INFO] Added 1 targets for TestCo

@@ -27,6 +27,11 @@ import signal
 from datetime import datetime
 from urllib.parse import urlparse
 
+# AmonStrike core imports
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from core.config import Config
+from core.shell_manager import ShellManager, ProfessionalUI
+
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -79,11 +84,11 @@ SCAN_MODES = {
 ALL_MODULES = [
     "recon", "headers", "sqli", "xss", "csrf", "cors",
     "cookies", "dirs", "lfi", "ssrf", "idor", "rce",
-    "auth", "api", "info", "ports",
-    "osint", "waf", "takeover", "credentials",
-    "ssti", "jwt_deep", "race_condition",
-    "http_smuggling", "xxe",
-    "graphql_deep", "oauth", "business_logic", "cache_poison",
+    "auth", "api", "info", "ports", "osint", "waf",
+    "takeover", "credentials", "ssti", "jwt_deep",
+    "race_condition", "http_smuggling", "xxe",
+    "graphql_deep", "oauth", "business_logic",
+    "cache_poison", "deserialization",
 ]
 
 def log(msg, level="*"):
@@ -217,8 +222,15 @@ class AmonStrike:
         if self.use_nde and self.mode in ["deep", "nde", "normal"]:
             self._run_nde_engine()
 
+        # Phase 3.5: Intelligence engine (if requested)
+        bypass_headers = {}
+        if getattr(self.args, "intel", False) or self.mode == "deep":
+            self._run_intelligence()
+        if getattr(self.args, "waf_bypass", False) or self.mode in ["deep","nde"]:
+            bypass_headers = self._run_waf_bypass()
+
         # Phase 4: Run scan modules
-        self._run_modules(modules, tool_status)
+        self._run_modules(modules, tool_status, bypass_headers=bypass_headers)
 
         # Phase 5: Stop UI
         if self.ui:
@@ -227,6 +239,14 @@ class AmonStrike:
 
         # Phase 6: Merge all findings
         self._merge_findings()
+
+        # Phase 6.5: Chain engine
+        if not getattr(self.args, "no_chain", False):
+            self._run_chain_engine()
+
+        # Phase 6.6: Screenshots
+        if not getattr(self.args, "no_ui", False):
+            self._run_screenshots()
 
         # Phase 7: Generate report
         self._generate_report(modules)
@@ -326,7 +346,7 @@ class AmonStrike:
             # Start UI in background thread
             self.ui_thread = self.ui.run_in_thread()
             time.sleep(0.3)
-            self.ui.log(f"AmonStrike v2.0 started", "+")
+            self.ui.log(f"AmonStrike v4.0 started", "+")
             self.ui.log(f"Target: {self.url}", "i")
             log("Real-time UI started", "+")
         except Exception as e:
@@ -408,7 +428,7 @@ class AmonStrike:
         except Exception as e:
             log(f"NDE startup error: {e}", "~")
 
-    def _run_modules(self, modules, tool_status):
+    def _run_modules(self, modules, tool_status, bypass_headers=None):
         """Run all scan modules, feeding findings to UI live."""
         total = len(modules)
         if self.ui:
@@ -504,10 +524,6 @@ class AmonStrike:
             "business_logic":  ("modules.business_logic",  "BusinessLogicModule"),
             "cache_poison":    ("modules.cache_poison",    "CachePoisonModule"),
             "deserialization": ("modules.deserialization", "DeserializationModule"),
-            "graphql_deep":("modules.graphql_deep", "GraphqlDeepModule"),
-            "oauth":        ("modules.oauth",        "OauthModule"),
-            "business_logic":("modules.business_logic","BusinessLogicModule"),
-            "cache_poison": ("modules.cache_poison",  "CachePoisonModule"),
         }
 
         if name not in module_map:
@@ -652,6 +668,115 @@ class AmonStrike:
             print(f"  {D}Open report:{X} firefox {self.html_report}")
         print(f"{D}  ════════════════════════════════════════════════════════{X}\n")
 
+    def _run_intelligence(self):
+        """Run Level 1/2/3 intelligence engine."""
+        try:
+            from intelligence.orchestrator import IntelligenceOrchestrator
+            log("Running intelligence engine (WAF + ASN + GitHub + JS)...", "*")
+            orch = IntelligenceOrchestrator(
+                self.url,
+                output_dir=str(self.output_dir / "intelligence"),
+                github_token=getattr(self.args, "github_token", None),
+            )
+            results = orch.run_all(parallel=True)
+            # Add intelligence findings to main findings
+            for finding in results.get("findings", []):
+                module = finding.get("module", "intel")
+                if module not in self.results:
+                    self.results[module] = {"findings": []}
+                self.results[module]["findings"].append(finding)
+            log(f"Intelligence complete: {len(results.get('findings',[]))} findings", "+")
+            return results
+        except Exception as e:
+            log(f"Intelligence engine error: {e}", "~")
+            return {}
+
+    def _run_chain_engine(self):
+        """Run chain engine on all collected findings."""
+        try:
+            from intelligence.chain_engine import ChainEngine
+            all_findings = []
+            for module_results in self.results.values():
+                if isinstance(module_results, dict):
+                    all_findings.extend(module_results.get("findings", []))
+            
+            if not all_findings:
+                return []
+            
+            log(f"Running chain engine on {len(all_findings)} findings...", "*")
+            engine = ChainEngine(self.url)
+            chains = engine.analyze(all_findings)
+            
+            if chains:
+                log(f"Chains found: {len(chains)} (escalated findings)", "!")
+                for chain in chains:
+                    if "chain" not in self.results:
+                        self.results["chain"] = {"findings": []}
+                    self.results["chain"]["findings"].append({
+                        "title":       f"CHAIN: {chain['name']}",
+                        "severity":    chain["severity"],
+                        "module":      "chain",
+                        "url":         chain.get("trigger_url", self.url),
+                        "description": chain.get("impact", ""),
+                        "evidence":    "\n".join(chain.get("steps", [])),
+                        "remediation": "Fix triggering vulnerability",
+                        "chain_data":  chain,
+                    })
+            return chains
+        except Exception as e:
+            log(f"Chain engine error: {e}", "~")
+            return []
+
+    def _run_screenshots(self):
+        """Capture screenshots of all CRITICAL/HIGH findings."""
+        try:
+            from verify.screenshot import ScreenshotEngine
+            all_findings = []
+            for module_results in self.results.values():
+                if isinstance(module_results, dict):
+                    for f in module_results.get("findings", []):
+                        if f.get("severity") in ["CRITICAL","HIGH"]:
+                            all_findings.append(f)
+            
+            if not all_findings:
+                return
+            
+            log(f"Capturing screenshots for {len(all_findings)} findings...", "*")
+            shot_dir = str(self.output_dir / "screenshots")
+            with ScreenshotEngine(shot_dir, self.url) as eng:
+                for finding in all_findings[:10]:  # Limit to 10
+                    try:
+                        shots = eng.capture_finding(finding)
+                        finding["screenshots"] = shots
+                    except Exception:
+                        pass
+            log("Screenshots captured", "+")
+        except Exception as e:
+            log(f"Screenshot error: {e}", "~")
+
+    def _run_waf_bypass(self):
+        """Detect WAF and return bypass headers to inject into base modules."""
+        try:
+            from intelligence.waf_engine import WAFIntelligence, WAFBypassEngine
+            log("Checking for WAF...", "*")
+            waf = WAFIntelligence(self.url)
+            result = waf.full_analysis()
+            
+            if result.get("origin_ips"):
+                log(f"Origin IP found: {result['origin_ips'][0]} — bypassing WAF", "!")
+                # Could redirect all traffic to origin IP
+            
+            if result.get("waf"):
+                log(f"WAF detected: {result['waf']} — applying bypass headers", "!")
+                byp = WAFBypassEngine()
+                return byp.x_forwarded_for_bypass()
+            
+            return {}
+        except Exception as e:
+            log(f"WAF bypass error: {e}", "~")
+            return {}
+
+
     def _handle_interrupt(self, sig, frame):
         """Handle Ctrl+C gracefully."""
         print(f"\n\n{Y}[~] Interrupted — generating partial report...{X}\n")
@@ -693,7 +818,7 @@ def run_idor_scan(target: str, credentials: list = None):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="AmonStrike v2.0 — Never Dead-End Bug Bounty Recon Framework",
+        description="AmonStrike v4.0 — Never Dead-End Bug Bounty Recon Framework",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Scan Modes:
@@ -729,6 +854,21 @@ Examples:
     parser.add_argument("--headers",  help="Extra headers as JSON string")
     parser.add_argument("--wordlist", help="Custom wordlist for directory enumeration")
     parser.add_argument("--output",   help="Output directory (default: output/)")
+    parser.add_argument("--intel",     action="store_true",
+                        help="Run intelligence engine (WAF + ASN + GitHub + JS analysis)")
+    parser.add_argument("--recon",     action="store_true",
+                        help="Run ProjectDiscovery recon pipeline (subfinder→dnsx→httpx→katana→nuclei)")
+    parser.add_argument("--chain",     action="store_true", default=True,
+                        help="Run chain engine on findings (default: True)")
+    parser.add_argument("--no-chain",  action="store_true",
+                        help="Disable chain engine")
+    parser.add_argument("--waf-bypass",action="store_true",
+                        help="Auto-detect WAF and apply bypass headers/payloads")
+    parser.add_argument("--credentials",help="Auth credentials JSON: [{username,password,role}]")
+    parser.add_argument("--github-token", help="GitHub API token for secret scanning")
+    parser.add_argument("--multi-shell", action="store_true",
+                        help="Open separate terminal panes for verbose output")
+    parser.add_argument("--config",    help="Config file (~/.amonstrike/config.yml)")
 
     args = parser.parse_args()
 
