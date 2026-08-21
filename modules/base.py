@@ -42,8 +42,18 @@ class BaseModule:
 
     # Default rate limit: requests per second
     RATE_LIMIT  = 10
-    MAX_RETRIES = 2
-    RETRY_DELAY = 0.5  # seconds, doubles each retry
+    MAX_RETRIES = 3
+    RETRY_DELAY = 1.0
+
+    # WAF bypass headers - rotate on 403
+    WAF_BYPASS_HEADERS = [
+        {},  # baseline
+        {"X-Forwarded-For": "127.0.0.1", "X-Real-IP": "127.0.0.1"},
+        {"X-Originating-IP": "127.0.0.1", "X-Remote-IP": "127.0.0.1"},
+        {"X-Custom-IP-Authorization": "127.0.0.1"},
+        {"X-Forwarded-Host": "localhost"},
+        {"CF-Connecting-IP": "127.0.0.1", "True-Client-IP": "127.0.0.1"},
+    ]  # seconds, doubles each retry
 
     def __init__(self, url: str, timeout: int = 10,
                  cookies: dict = None, headers: dict = None,
