@@ -523,6 +523,12 @@ class AmonStrike:
             else:
                 log(f"[{i}/{total}] Running module: {module_name}", "*")
 
+            # Debug: show module kwargs
+            if getattr(self.args, "debug", False):
+                log(f"  cookies: {bool(self._parse_cookies())} "
+                    f"headers: {bool(self._parse_headers())} "
+                    f"timeout: {self.args.timeout}", "i")
+
             try:
                 module_result = self._run_single_module(
                     module_name, tool_status
@@ -555,11 +561,14 @@ class AmonStrike:
                     log(msg, "+" if n_findings else "*")
 
             except Exception as e:
-                err_msg = f"Module {module_name} error: {e}"
+                import traceback as _tb
+                err_msg = f"Module {module_name} error: {type(e).__name__}: {e}"
                 if self.ui:
                     self.ui.log(err_msg, "!")
                 else:
                     log(err_msg, "!")
+                if getattr(self.args, "debug", False):
+                    print(_tb.format_exc())
                 self.results[module_name] = {"findings": [], "errors": [str(e)]}
 
     def _run_single_module(self, name, tool_status):
@@ -1068,6 +1077,8 @@ Examples:
     parser.add_argument("--github-token", help="GitHub API token for secret scanning")
     parser.add_argument("--multi-shell", action="store_true",
                         help="Open separate terminal panes for verbose output")
+    parser.add_argument("--debug", action="store_true",
+        help="Show full errors from every module (find silent failures)")
     parser.add_argument("--automate", action="store_true",
         help="Full automated deep dive — replaces manual testing")
     parser.add_argument("--automate-pages", type=int, default=100,
