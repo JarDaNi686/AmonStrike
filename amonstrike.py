@@ -34,6 +34,7 @@ from core.shell_manager import ShellManager, ProfessionalUI
 from core.auth_engine import ScanAuthEngine
 from core.endpoint_distributor import EndpointDistributor, ToolIntegrator
 from core.scan_state import ScanState
+from core.automate_engine import AutomateEngine
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -281,6 +282,11 @@ class AmonStrike:
             self._run_intelligence()
         if getattr(self.args, "waf_bypass", False) or self.mode in ["deep","nde"]:
             bypass_headers = self._run_waf_bypass()
+
+        # Phase 3.8: AutomateEngine — full automated deep dive
+        self._automate_findings = []
+        if getattr(self.args, "automate", False):
+            self._run_automate()
 
         # Phase 4: Run scan modules
         self._run_modules(modules, tool_status, bypass_headers=bypass_headers)
@@ -829,6 +835,39 @@ class AmonStrike:
             print(f"  {D}Open report:{X} firefox {self.html_report}")
         print(f"{D}  ════════════════════════════════════════════════════════{X}\n")
 
+    def _run_automate(self):
+        """Run full automated deep dive — eliminates manual testing."""
+        log("Starting AutomateEngine — full automated deep dive...", "*")
+        try:
+            creds_raw = getattr(self.args, "credentials", None)
+            creds = None
+            if creds_raw:
+                creds = json.loads(creds_raw) if isinstance(creds_raw, str) else creds_raw
+
+            engine = AutomateEngine(
+                self.url,
+                credentials=creds,
+                max_pages=getattr(self.args, "automate_pages", 100),
+                timeout=getattr(self.args, "timeout", 30),
+            )
+            result = engine.run()
+            self._automate_findings = result.get("findings", [])
+
+            # Add to results so they appear in report
+            self.results["automate"] = {
+                "findings": self._automate_findings,
+                "info": {
+                    "requests_tested": result.get("requests_tested", 0),
+                    "sessions_used":   result.get("sessions", 0),
+                },
+            }
+            log(f"AutomateEngine: {len(self._automate_findings)} findings from "
+                f"{result.get('requests_tested',0)} requests tested", "+")
+        except Exception as e:
+            import traceback
+            log(f"AutomateEngine error: {e}", "!")
+            log(traceback.format_exc(), "!")
+
     def _run_intelligence(self):
         """Run Level 1/2/3 intelligence engine."""
         try:
@@ -1029,6 +1068,10 @@ Examples:
     parser.add_argument("--github-token", help="GitHub API token for secret scanning")
     parser.add_argument("--multi-shell", action="store_true",
                         help="Open separate terminal panes for verbose output")
+    parser.add_argument("--automate", action="store_true",
+        help="Full automated deep dive — replaces manual testing")
+    parser.add_argument("--automate-pages", type=int, default=100,
+        help="Max pages for authenticated crawl (default: 100)")
     parser.add_argument("--config",    help="Config file (~/.amonstrike/config.yml)")
 
     args = parser.parse_args()
