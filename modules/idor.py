@@ -120,7 +120,12 @@ class IdorModule(BaseModule):
         # Test adjacent IDs
         for delta in [1, -1, 2, 10, 100]:
             test_id  = orig_id_int + delta
-            test_url = url.replace(str(orig_id_int), str(test_id), 1)
+            # Safe replace: only in path, not host/IP
+            from urllib.parse import urlparse as _up, urlunparse as _uu
+            _parsed = _up(url)
+            _new_path = _parsed.path.replace(str(orig_id_int), str(test_id), 1)
+            _nq = _parsed.query.replace(str(orig_id_int), str(test_id), 1) if str(orig_id_int) in _parsed.query else _parsed.query
+            test_url = _uu((_parsed.scheme, _parsed.netloc, _new_path, _parsed.params, _nq, _parsed.fragment))
 
             r_test = self.session.get(test_url, timeout=self.timeout, verify=False)
             if not r_test or r_test.status_code not in [200, 201]:
@@ -178,7 +183,11 @@ class IdorModule(BaseModule):
         for test_id in range(1, 6):
             if test_id == orig_int:
                 continue
-            test_url = url.replace(str(orig_int), str(test_id), 1)
+            from urllib.parse import urlparse as _up2, urlunparse as _uu2
+            _p2 = _up2(url)
+            _np2 = _p2.path.replace(str(orig_int), str(test_id), 1)
+            _nq2 = _p2.query.replace(str(orig_int), str(test_id), 1) if str(orig_int) in _p2.query else _p2.query
+            test_url = _uu2((_p2.scheme, _p2.netloc, _np2, _p2.params, _nq2, _p2.fragment))
             r = self.session.get(test_url, timeout=self.timeout, verify=False)
             if r and r.status_code == 200 and len(r.text) > 20:
                 accessible.append(test_id)

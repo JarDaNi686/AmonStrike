@@ -41,6 +41,23 @@ class OpenRedirectModule(BaseModule):
         return self.result()
 
     def _test_params(self):
+        # Spider for redirect endpoints first
+        r0 = self.get("")
+        if r0:
+            import re as _re
+            links = _re.findall(r'href=["\'"]([^"\'#]+)["\'"]', r0.text)
+            for link in links[:20]:
+                if link.startswith("/"): link = f"{self.parsed.scheme}://{self.parsed.netloc}{link}"
+                for param in self.REDIRECT_PARAMS[:5]:
+                    for payload in self.PAYLOADS[:3]:
+                        r = self.get(link.split("?")[0].replace(self.url,""), 
+                                    params={param: payload}, allow_redirects=False)
+                        if r and r.status_code in [301,302,303,307,308]:
+                            loc = r.headers.get("Location","")
+                            if "evil.com" in loc or "javascript:" in loc:
+                                self._report(param, payload, r); return
+
+    def _test_params_original(self):
         for param in REDIRECT_PARAMS:
             for payload in PAYLOADS[:5]:
                 r = self.get(params={param: payload}, allow_redirects=False)

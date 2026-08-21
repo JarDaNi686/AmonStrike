@@ -59,19 +59,34 @@ class XssModule(BaseModule):
         return False
 
     def _test_url_params(self, resp):
-        """Test URL parameters for reflected XSS."""
+        """Test URL parameters for reflected XSS. Spiders first."""
+        from urllib.parse import urlparse, parse_qs
+
+        # 1. Test current URL params if present
         parsed = urlparse(self.url)
-        params = parse_qs(parsed.query)
+        if parsed.query:
+            for param, vals in parse_qs(parsed.query).items():
+                self._test_param_xss(param, vals[0])
+                if self.findings: return
 
-        if not params:
-            # Try common parameter names
-            test_params = ["q", "search", "name", "s", "query", "keyword", "term", "msg", "message"]
-            for param in test_params:
-                self._test_param_xss(param, "test")
-            return
+        # 2. Spider homepage for links with params
+        if resp:
+            links = re.findall(r'href=["\'"]([^"\'#]+\?[^"\'#]+)["\'"]', resp.text)
+            for link in links[:20]:
+                if link.startswith("/"): link = f"{self.parsed.scheme}://{self.parsed.netloc}{link}"
+                p2 = urlparse(link)
+                for param, vals in parse_qs(p2.query).items():
+                    saved = self.url
+                    self.url = f"{p2.scheme}://{p2.netloc}{p2.path}"
+                    self._test_param_xss(param, vals[0])
+                    self.url = saved
+                    if self.findings: return
 
-        for param, values in params.items():
-            self._test_param_xss(param, values[0])
+        # 3. Fallback: common params on base URL
+        for param in ["q","search","s","query","name","msg","keyword","term","id","page"]:
+            self._test_param_xss(param, "test")
+            if self.findings: return
+
 
     def _test_param_xss(self, param, original):
         """Test a single parameter for XSS."""

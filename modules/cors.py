@@ -65,5 +65,38 @@ class CorsModule(BaseModule):
                     url=resp.url
                 )
 
+        # Also test API endpoints — CORS is usually on /api/* not homepage
+        import re as _re
+        r0 = self.get("")
+        if r0:
+            # Find API paths from JS and links
+            api_paths = set()
+            for m in _re.finditer(r'["\'](/api/[^\s"\'<>?#]+)["\'"]', r0.text):
+                api_paths.add(m.group(1))
+            for m in _re.finditer(r'href=["\'"]([^"\'#]*api[^"\'#]*)["\'"]', r0.text):
+                api_paths.add(m.group(1))
+            # Also try common API paths
+            for path in ["/api/","/api/v1/","/api/data","/api/user","/api/users","/api/me"]:
+                api_paths.add(path)
+
+            for path in list(api_paths)[:10]:
+                for origin in ["https://evil.com", "null"]:
+                    resp2 = self.get(path, headers={"Origin": origin})
+                    if not resp2: continue
+                    acao2 = resp2.headers.get("Access-Control-Allow-Origin","")
+                    acac2 = resp2.headers.get("Access-Control-Allow-Credentials","")
+                    if acao2 == origin or (acao2 == "*" and acac2.lower() == "true"):
+                        sev = "CRITICAL" if acac2.lower() == "true" else "HIGH"
+                        self.add_finding(
+                            title=f"CORS Misconfiguration on {path}",
+                            severity=sev,
+                            description=f"API endpoint {path} reflects Origin. {'Credentials allowed → full account takeover.' if acac2.lower()=='true' else ''}",
+                            evidence=f"Path: {path}\nOrigin: {origin}\nACAO: {acao2}\nACAC: {acac2}",
+                            remediation="Whitelist allowed origins. Never reflect arbitrary Origin headers.",
+                            url=self.url+path
+                        )
+                    if self.findings: break
+                if self.findings: break
+
         self.log(f"CORS scan complete — {len(self.findings)} findings", "+")
         return self.result()
