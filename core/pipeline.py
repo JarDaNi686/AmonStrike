@@ -361,8 +361,25 @@ class AmonStrikePipeline:
                 if self.debug:
                     self.log(f"  [{mod_path.split('.')[1]}] error: {e}", "!")
 
+        # Run false positive validator on all findings
+        try:
+            from core.fp_validator import FalsePositiveValidator
+            import requests as _req
+            r0 = _req.get(self.target, timeout=8, verify=False,
+                         headers={"User-Agent":"Mozilla/5.0"})
+            validator = FalsePositiveValidator(r0.text if r0 else "")
+            before = len(findings)
+            findings = validator.validate_all(findings)
+            removed = before - len(findings)
+            if removed:
+                self.log(f"FP filter: removed {removed} false positives", "i")
+                for t in validator.summary()["rejected_titles"]:
+                    self.log(f"  Rejected: {t[:60]}", "i")
+        except Exception as e:
+            self.log(f"FP validator: {e}", "~")
+
         self.state["findings"] = findings
-        self.log(f"Attack: {len(findings)} total findings", "+")
+        self.log(f"Attack: {len(findings)} real findings", "+")
 
     # ── STEP 08: Automate Engine (IDOR/Auth bypass) ───────────
     def _step08_automate(self):

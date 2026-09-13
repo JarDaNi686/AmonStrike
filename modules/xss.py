@@ -174,8 +174,19 @@ class XssModule(BaseModule):
                             self._report(url, method, param_name, waf_payload, r3, context)
                             return
 
-                    # At least report reflection even if no executable payload
-                    self._report(url, method, param_name, marker_p, r, context, reflection_only=True)
+                    # Only report reflection if it's in a dangerous context
+                    if context in ["html","attr","js_string","js_code"]:
+                        # Try one more WAF bypass before reporting as medium
+                        bypassed = False
+                        for bp in WAF_XSS[5:10]:
+                            test_params[param_name] = bp
+                            r4 = self.get(url.split("?")[0], params=test_params) if method=="GET" else self.post(url.split("?")[0], data=test_params)
+                            if r4 and bp in r4.text:
+                                self._report(url, method, param_name, bp, r4, context)
+                                bypassed = True
+                                break
+                        if not bypassed and context != "unknown":
+                            self._report(url, method, param_name, marker_p, r, context, reflection_only=True)
                     break
 
     def _detect_context(self, html: str, marker: str) -> str:

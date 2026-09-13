@@ -117,8 +117,10 @@ class SsrfModule(BaseModule):
                 if not r2:
                     r2 = self.get(path, params={param: meta_url})
                 if r2 and any(sig in r2.text for sig in SSRF_SIGNATURES):
-                    self._report_ssrf(param, meta_url, r2, cloud)
-                    return
+                    # Verify it's real metadata, not just homepage HTML
+                    if self._is_real_ssrf(r2.text, r.text if r else ""):
+                        self._report_ssrf(param, meta_url, r2, cloud)
+                        return
 
     def _test_redirect_ssrf(self):
         """Test open redirects that can be chained for SSRF."""
@@ -127,7 +129,26 @@ class SsrfModule(BaseModule):
             for meta_url in list(CLOUD_METADATA.values())[:2]:
                 r = self.get(params={param: meta_url}, allow_redirects=True)
                 if r and any(sig in r.text for sig in SSRF_SIGNATURES):
-                    self._report_ssrf(param, meta_url, r, "Redirect Chain")
+                    r0 = self.get("")
+                    if self._is_real_ssrf(r.text, r0.text if r0 else ""):
+                        self._report_ssrf(param, meta_url, r, "Redirect Chain")
+
+    def _is_real_ssrf(self, response_text: str, baseline_text: str) -> bool:
+        """Verify SSRF is real - response must differ from baseline AND contain metadata."""
+        # Must contain actual metadata signatures
+        real_sigs = ["ami-id","instance-id","AccessKeyId","iam/security-credentials",
+                     "computeMetadata","local-ipv4","placement","availability-zone",
+                     "mac","security-groups","instance-type"]
+        has_real = any(sig in response_text for sig in real_sigs)
+
+        # Response must be substantially different from baseline homepage
+        if baseline_text and len(baseline_text) > 100:
+            # If response is same length (±5%) as homepage = false positive
+            ratio = abs(len(response_text) - len(baseline_text)) / len(baseline_text)
+            if ratio < 0.05:
+                return False
+
+        return has_real
 
     def _report_ssrf(self, param: str, payload: str, r, cloud: str):
         # Identify what was exposed

@@ -19,10 +19,34 @@ CMD_PARAMS = [
 ]
 
 CMD_SIGNATURES = ["uid=","root:","www-data","nobody","daemon","PING"]
+CMD_REAL_PATTERNS = [
+    r"uid=\d+\(",      # uid=33(www-data) — real output
+    r"root:x:\d+",      # root:x:0:0 — /etc/passwd
+    r"\d+ bytes from",  # ping output
+    r"PING .* \d+ bytes",
+]
 
 class CommandInjectionModule(BaseModule):
     NAME        = "command_injection"
     DESCRIPTION = "OS command injection — dedicated module, time-based blind"
+
+    def _is_real_rce(self, response_text: str, baseline_text: str) -> bool:
+        """Verify RCE - must show actual command output, not just HTML containing uid=."""
+        import re
+        # Real RCE patterns - not just substrings
+        real_patterns = [
+            r"uid=\d+\(\w+\)",       # uid=33(www-data)
+            r"root:x:\d+:\d+:",         # /etc/passwd line
+            r"\d+ bytes from \d+\.\d+\.\d+\.\d+",  # ping
+            r"Linux .* \#\d+",          # uname output
+            r"total \d+\ndrwx",         # ls output
+        ]
+        for pat in real_patterns:
+            if re.search(pat, response_text):
+                # Also verify it's NOT in the baseline
+                if not re.search(pat, baseline_text):
+                    return True
+        return False
 
     def run(self):
         self.log("Testing OS command injection...")
@@ -33,10 +57,14 @@ class CommandInjectionModule(BaseModule):
         return self.result()
 
     def _test_url_params(self):
+        # Get baseline to detect false positives
+        r0 = self.get("")
+        baseline_text = r0.text if r0 else ""
+        self._baseline = baseline_text
         for param in CMD_PARAMS:
             for payload in CMD_PAYLOADS[:10]:
                 r = self.get(params={param: f"test{payload}"})
-                if r and any(s in r.text for s in CMD_SIGNATURES):
+                if r and self._is_real_rce(r.text, baseline_text):
                     match = next(s for s in CMD_SIGNATURES if s in r.text)
                     self.add_finding(
                         title       = f"OS Command Injection — Parameter \'{param}\'",
@@ -59,7 +87,7 @@ class CommandInjectionModule(BaseModule):
                 for payload in ["; id", "| id"]:
                     data = dict(form["inputs"]); data[field] = f"test{payload}"
                     r = self.post(form.get("action",""), data=data)
-                    if r and any(s in r.text for s in CMD_SIGNATURES):
+                    if r and self._is_real_rce(r.text, getattr(self,"_baseline","")):
                         self.add_finding(
                             title       = f"OS Command Injection via Form Field \'{field}\'",
                             severity    = "CRITICAL",
