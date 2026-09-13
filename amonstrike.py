@@ -34,6 +34,7 @@ from core.shell_manager import ShellManager, ProfessionalUI
 from core.auth_engine import ScanAuthEngine
 from core.endpoint_distributor import EndpointDistributor, ToolIntegrator
 from core.scan_state import ScanState
+from core.pipeline import AmonStrikePipeline
 from core.automate_engine import AutomateEngine
 
 # Add project root to path
@@ -1077,6 +1078,8 @@ Examples:
     parser.add_argument("--github-token", help="GitHub API token for secret scanning")
     parser.add_argument("--multi-shell", action="store_true",
                         help="Open separate terminal panes for verbose output")
+    parser.add_argument("--pipeline", action="store_true",
+        help="Run full 15-step pipeline (recommended)")
     parser.add_argument("--debug", action="store_true",
         help="Show full errors from every module (find silent failures)")
     parser.add_argument("--automate", action="store_true",
