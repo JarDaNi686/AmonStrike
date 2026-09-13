@@ -185,8 +185,17 @@ class XssModule(BaseModule):
                                 self._report(url, method, param_name, bp, r4, context)
                                 bypassed = True
                                 break
-                        if not bypassed and context != "unknown":
-                            self._report(url, method, param_name, marker_p, r, context, reflection_only=True)
+                        # Only report if context is exploitable AND not unknown
+                        if not bypassed and context in ["html","attr","js_string"]:
+                            # Final check: is the reflection inside a tag/attribute?
+                            import re as _re
+                            marker_pos = r.text.find(MARKER)
+                            if marker_pos > 0:
+                                before = r.text[max(0,marker_pos-100):marker_pos]
+                                # Inside an open tag = exploitable
+                                if "<" in before and ">" not in before[-20:]:
+                                    self._report(url, method, param_name,
+                                                marker_p, r, context, reflection_only=True)
                     break
 
     def _detect_context(self, html: str, marker: str) -> str:

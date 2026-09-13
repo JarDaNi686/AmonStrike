@@ -395,6 +395,23 @@ class AmonStrikePipeline:
             self.log(f"FP validator: {e}", "~")
 
         self.state["findings"] = findings
+        # Run custom attacks (novel attack classes)
+        try:
+            from core.custom_attacks import CustomAttackEngine, install_builtin_attacks
+            install_builtin_attacks()
+            cookies = sessions[0]["cookies"] if sessions else {}
+            heads   = sessions[0]["headers"] if sessions else {}
+            ca_engine = CustomAttackEngine(self.target, cookies, heads)
+            ca_findings = ca_engine.run_all()
+            for f in ca_findings:
+                f.setdefault("timestamp", datetime.now().isoformat())
+            findings.extend(ca_findings)
+            if ca_findings:
+                self.log(f"Custom attacks: {len(ca_findings)} findings", "+")
+        except Exception as e:
+            self.log(f"Custom attacks: {e}", "~")
+
+        self.state["findings"] = findings
         self.log(f"Attack: {len(findings)} real findings", "+")
 
     # ── STEP 08: Automate Engine (IDOR/Auth bypass) ───────────

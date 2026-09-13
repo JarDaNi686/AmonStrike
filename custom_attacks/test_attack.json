@@ -1,0 +1,54 @@
+{
+  "name": "JWT None Algorithm Bypass",
+  "description": "Test if server accepts JWT with 'none' algorithm, bypassing signature verification",
+  "author": "JarDani",
+  "severity": "CRITICAL",
+  "cwe": "CWE-347",
+  "target": {
+    "method": "GET",
+    "path": "",
+    "params": [],
+    "headers": {
+      "Authorization": "{{payload}}"
+    },
+    "body": {}
+  },
+  "payloads": [],
+  "generate": {
+    "type": "jwt_none",
+    "config": {}
+  },
+  "detect": {
+    "response_contains": [
+      "admin",
+      "dashboard",
+      "profile",
+      "user",
+      "data"
+    ],
+    "response_not_contains": [
+      "unauthorized",
+      "invalid token",
+      "401"
+    ],
+    "status_codes": [
+      200,
+      201
+    ],
+    "response_differs": true,
+    "time_delay": 0,
+    "header_contains": {}
+  },
+  "false_positive_filter": {
+    "baseline_diff_pct": 10,
+    "exclude_patterns": [
+      "login",
+      "sign in"
+    ]
+  },
+  "impact": "Complete authentication bypass. Attacker can impersonate any user including admin.",
+  "remediation": "Reject JWTs with 'none' algorithm. Explicitly whitelist allowed algorithms.",
+  "references": [
+    "CVE-2015-9235"
+  ]
+}

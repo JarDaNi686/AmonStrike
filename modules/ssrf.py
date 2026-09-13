@@ -74,6 +74,11 @@ class SsrfModule(BaseModule):
         # Test redirect-based SSRF
         self._test_redirect_ssrf()
 
+        # OOB blind SSRF test
+        oob_finds = self._test_oob_ssrf()
+        for f in oob_finds:
+            self.findings.append(f)
+
         self.log(f"SSRF complete — {len(self.findings)} findings", "+")
         return self.result()
 
@@ -134,21 +139,61 @@ class SsrfModule(BaseModule):
                         self._report_ssrf(param, meta_url, r, "Redirect Chain")
 
     def _is_real_ssrf(self, response_text: str, baseline_text: str) -> bool:
-        """Verify SSRF is real - response must differ from baseline AND contain metadata."""
-        # Must contain actual metadata signatures
-        real_sigs = ["ami-id","instance-id","AccessKeyId","iam/security-credentials",
-                     "computeMetadata","local-ipv4","placement","availability-zone",
-                     "mac","security-groups","instance-type"]
-        has_real = any(sig in response_text for sig in real_sigs)
-
-        # Response must be substantially different from baseline homepage
+        """Verify SSRF is real."""
+        real_sigs = [
+            "ami-id","instance-id","AccessKeyId","SecretAccessKey",
+            "iam/security-credentials","computeMetadata","local-ipv4",
+            "placement","availability-zone","security-groups","instance-type",
+            "metadata.google.internal","169.254.169.254",
+        ]
+        # Must contain real metadata
+        if not any(sig in response_text for sig in real_sigs):
+            return False
+        # Must differ from baseline
         if baseline_text and len(baseline_text) > 100:
-            # If response is same length (±5%) as homepage = false positive
-            ratio = abs(len(response_text) - len(baseline_text)) / len(baseline_text)
-            if ratio < 0.05:
+            ratio = abs(len(response_text) - len(baseline_text)) / max(len(baseline_text),1)
+            if ratio < 0.03:
                 return False
+        return True
 
-        return has_real
+    def _test_oob_ssrf(self) -> list:
+        """Test SSRF via OOB DNS callback - confirms blind SSRF."""
+        findings = []
+        try:
+            from core.interactsh import OOBDetector
+            oob = OOBDetector()
+            params = ["url","redirect","next","callback","webhook","src","dest"]
+            for param in params:
+                for payload in oob.ssrf_payloads()[:2]:
+                    r = self.get(params={param: payload})
+                    if not r:
+                        continue
+            # Wait and check for DNS hit
+            result = oob.check(wait=8)
+            if result.get("has_hit"):
+                hit = result["hits"][0]
+                findings.append({
+                    "title":       "Blind SSRF Confirmed via OOB DNS Callback",
+                    "severity":    "CRITICAL",
+                    "module":      "ssrf",
+                    "description": (
+                        "Server made an outbound DNS/HTTP request to attacker-controlled "
+                        "server, confirming blind SSRF. Server can reach external hosts."
+                    ),
+                    "evidence": (
+                        f"OOB URL: {result['url']}\n"
+                        f"Hit type: {hit.get('type','')}\n"
+                        f"Remote IP: {hit.get('remote_ip','')}\n"
+                        f"Timestamp: {hit.get('timestamp','')}"
+                    ),
+                    "remediation": "Implement URL allowlist. Block outbound requests to external hosts.",
+                    "url": self.url,
+                    "cve": "CWE-918",
+                })
+            oob.stop()
+        except Exception:
+            pass
+        return findings
 
     def _report_ssrf(self, param: str, payload: str, r, cloud: str):
         # Identify what was exposed

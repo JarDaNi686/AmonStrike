@@ -1,0 +1,55 @@
+{
+  "name": "Cache Deception Attack",
+  "description": "Test if authenticated pages are cached by appending static file extensions",
+  "author": "JarDani",
+  "severity": "HIGH",
+  "cwe": "CWE-525",
+  "target": {
+    "method": "GET",
+    "path": "/account/profile.css",
+    "params": [],
+    "headers": {},
+    "body": {}
+  },
+  "payloads": [
+    "/account/profile.css",
+    "/dashboard/settings.js",
+    "/api/user/data.png"
+  ],
+  "generate": {
+    "type": "none",
+    "config": {}
+  },
+  "detect": {
+    "response_contains": [
+      "email",
+      "username",
+      "account",
+      "profile",
+      "token"
+    ],
+    "response_not_contains": [
+      "404",
+      "not found"
+    ],
+    "status_codes": [
+      200
+    ],
+    "response_differs": false,
+    "time_delay": 0,
+    "header_contains": {
+      "Cache-Control": ""
+    }
+  },
+  "false_positive_filter": {
+    "baseline_diff_pct": 0,
+    "exclude_patterns": [
+      "login"
+    ]
+  },
+  "impact": "Authenticated user data cached publicly. Any visitor can access victim's profile data.",
+  "remediation": "Set Cache-Control: no-store on authenticated responses. Validate path before caching.",
+  "references": [
+    "CWE-525"
+  ]
+}

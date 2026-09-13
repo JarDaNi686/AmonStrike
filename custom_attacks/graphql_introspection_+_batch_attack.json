@@ -1,0 +1,52 @@
+{
+  "name": "GraphQL Introspection + Batch Attack",
+  "description": "Test GraphQL for introspection enabled and batch query abuse",
+  "author": "JarDani",
+  "severity": "MEDIUM",
+  "cwe": "CWE-200",
+  "target": {
+    "method": "POST",
+    "path": "/graphql",
+    "params": [],
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "query": "{__schema{types{name}}}"
+    }
+  },
+  "payloads": [
+    "{__schema{types{name}}}",
+    "[{\"query\":\"{__schema{types{name}}}\"},{\"query\":\"{__schema{types{name}}}\"}]"
+  ],
+  "generate": {
+    "type": "none",
+    "config": {}
+  },
+  "detect": {
+    "response_contains": [
+      "__schema",
+      "types",
+      "QueryType",
+      "MutationType"
+    ],
+    "response_not_contains": [
+      "errors"
+    ],
+    "status_codes": [
+      200
+    ],
+    "response_differs": true,
+    "time_delay": 0,
+    "header_contains": {}
+  },
+  "false_positive_filter": {
+    "baseline_diff_pct": 10,
+    "exclude_patterns": []
+  },
+  "impact": "Schema disclosure exposes all queries, mutations, types. Enables targeted attacks.",
+  "remediation": "Disable introspection in production. Implement query depth/complexity limits.",
+  "references": [
+    "CWE-200"
+  ]
+}

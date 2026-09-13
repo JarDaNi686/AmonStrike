@@ -1,0 +1,50 @@
+{
+  "name": "HTTP Method Override Bypass",
+  "description": "Use X-HTTP-Method-Override header to bypass method-based access controls",
+  "author": "JarDani",
+  "severity": "HIGH",
+  "cwe": "CWE-284",
+  "target": {
+    "method": "POST",
+    "path": "",
+    "params": [],
+    "headers": {
+      "X-HTTP-Method-Override": "DELETE",
+      "X-Method-Override": "DELETE",
+      "_method": "DELETE"
+    },
+    "body": {}
+  },
+  "payloads": [
+    "DELETE",
+    "PUT",
+    "PATCH"
+  ],
+  "generate": {
+    "type": "none",
+    "config": {}
+  },
+  "detect": {
+    "response_contains": [],
+    "response_not_contains": [
+      "method not allowed",
+      "405"
+    ],
+    "status_codes": [
+      200,
+      204
+    ],
+    "response_differs": true,
+    "time_delay": 0,
+    "header_contains": {}
+  },
+  "false_positive_filter": {
+    "baseline_diff_pct": 5,
+    "exclude_patterns": []
+  },
+  "impact": "Bypass HTTP method restrictions. Perform DELETE/PUT on resources that block these methods.",
+  "remediation": "Validate HTTP method on server side. Do not trust X-HTTP-Method-Override header.",
+  "references": [
+    "CWE-284"
+  ]
+}
