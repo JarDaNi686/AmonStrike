@@ -319,7 +319,7 @@ def main():
     )
     parser.add_argument("--target",    help="Single target URL (e.g. https://api.zomato.com)")
     parser.add_argument("--discover",  action="store_true", help="Discover all Eternal subdomains")
-    parser.add_argument("--username",  required=True, help="Your HackerOne username")
+    parser.add_argument("--username",  default="jardani101", help="Your HackerOne username")
     parser.add_argument("--credentials", default="[]", help="JSON credentials array")
     parser.add_argument("--output",    default="output/eternal", help="Output directory")
     parser.add_argument("--tier",      choices=["1","2","3","all"], default="all",
