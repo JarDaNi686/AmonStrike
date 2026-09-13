@@ -65,25 +65,26 @@ class FalsePositiveValidator:
         return True
 
     def _check_command_injection(self, f: dict, evidence: str) -> bool:
-        """RCE is real only if response contains actual command output."""
-        real_patterns = [
-            r"uid=\d+\(\w+\)",            # uid=33(www-data)
-            r"gid=\d+\(\w+\)",            # gid=33(www-data)
-            r"root:x:\d+:\d+:",           # /etc/passwd
-            r"daemon:x:\d+",              # /etc/passwd
-            r"\d+ bytes from \d+\.\d+",   # ping
-            r"PING \S+ \(\d+\.\d+",       # ping header
-            r"Linux \S+ \d+\.\d+",        # uname
-            r"sh: .+: not found",         # shell error = real shell
-            r"command not found",         # real shell
-            r"/bin/sh",                   # real shell path
-        ]
-        for pat in real_patterns:
-            if re.search(pat, evidence):
-                # Must not be in baseline
-                if not re.search(pat, self.baseline):
-                    return True
+        """RCE confirmed by real command output patterns."""
+        # Real RCE: uid=33(www-data) has digits then parens
+        def has_uid_output(text):
+            if "uid=" not in text:
+                return False
+            idx = text.find("uid=")
+            after = text[idx+4:idx+20]
+            return any(c.isdigit() for c in after) and "(" in after
+
+        def has_real_output(text):
+            return (has_uid_output(text) or
+                    "root:x:0:0:" in text or
+                    "daemon:x:" in text or
+                    "command not found" in text or
+                    ("bytes from" in text and "icmp" in text.lower()))
+
+        if has_real_output(evidence) and not has_real_output(self.baseline):
+            return True
         return False
+
 
     def _check_sqli(self, f: dict, evidence: str) -> bool:
         """SQLi is real only if response contains actual DB error."""

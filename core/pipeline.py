@@ -15,6 +15,13 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
+try:
+    from core.scope_reader import ScopeReader
+    from core.duplicate_checker import DuplicateChecker
+    from core.knowledge import KnowledgeBase
+except Exception:
+    pass
+
 class AmonStrikePipeline:
 
     def __init__(self, target: str, output_dir: str = None,
@@ -106,6 +113,15 @@ class AmonStrikePipeline:
             except Exception:
                 pass
 
+        try:
+            sr = ScopeReader(self.program_handle, self.target)
+            scope["allowed_hosts"] = sr.in_scope
+            scope["out_of_scope"]  = sr.out_scope
+            scope["wildcards"]     = sr.wildcards
+            self.state["scope_reader"] = sr
+            self.log(f"Scope: {sr.summary()}", "+")
+        except Exception:
+            pass
         self.state["scope"] = scope
         self.log(f"Scope: {len(scope['allowed_hosts'])} in-scope hosts", "+")
 
@@ -458,6 +474,15 @@ class AmonStrikePipeline:
                 pass
 
         removed = len(findings) - len(unique)
+
+        # Duplicate checker against H1 Hacktivity
+        try:
+            dc = DuplicateChecker(self.program_handle)
+            unique, dupes = dc.filter(unique)
+            removed += dupes
+        except Exception:
+            pass
+
         self.state["findings"] = unique
         self.log(f"Dedup: {len(unique)} unique findings ({removed} removed)", "+")
 
@@ -472,7 +497,7 @@ class AmonStrikePipeline:
 
         try:
             from verify.screenshot import ScreenshotEngine
-            engine = ScreenshotEngine(str(self.output_dir / "screenshots"))
+            engine = ScreenshotEngine(self.target, str(self.output_dir / "screenshots"))
             for f in targets:
                 try:
                     shot = engine.capture(f.get("url",""))
@@ -558,6 +583,18 @@ class AmonStrikePipeline:
         memory["patterns"] = memory["patterns"][-500:]
         self._save_memory(memory)
         self.state["memory"] = memory
+        # Use KnowledgeBase class
+        try:
+            kb = KnowledgeBase()
+            for f in findings:
+                if f.get("severity") in ["CRITICAL","HIGH"]:
+                    kb.record_finding(f, urlparse(self.target).netloc)
+            hints = kb.get_hints(self.target)
+            self.state["next_hints"] = hints
+            for h in hints:
+                self.log(f"KB hint: {h}", "i")
+        except Exception:
+            pass
         self.log(f"Knowledge: {len(memory.get('patterns',[]))} patterns stored", "+")
 
     # ── STEP 15: LLM Memory Layer ──────────────────────────────

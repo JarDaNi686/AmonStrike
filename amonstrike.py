@@ -34,6 +34,7 @@ from core.shell_manager import ShellManager, ProfessionalUI
 from core.auth_engine import ScanAuthEngine
 from core.endpoint_distributor import EndpointDistributor, ToolIntegrator
 from core.scan_state import ScanState
+from reports.hackerone_format import generate_h1_package
 from core.pipeline import AmonStrikePipeline
 from core.automate_engine import AutomateEngine
 
