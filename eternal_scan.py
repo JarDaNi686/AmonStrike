@@ -9,8 +9,8 @@ Campaign: SQLi 1.5x multiplier (ends Sept 13, 2026)
   First Blood Critical: +$500
 
 Usage:
-  sudo python3 eternal_scan.py --target zomato.com --username YOUR_H1_USERNAME
-  sudo python3 eternal_scan.py --discover --username YOUR_H1_USERNAME
+  sudo python3 eternal_scan.py --target zomato.com --username jardani101
+  sudo python3 eternal_scan.py --discover --username jardani101
 """
 
 import os

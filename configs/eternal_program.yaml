@@ -1,10 +1,10 @@
 program:
   handle: eternal
   platform: hackerone
-  h1_username: "YOUR_H1_USERNAME"
+  h1_username: "jardani101"
 
 required_headers:
-  X-Hackerone: "YOUR_H1_USERNAME"
+  X-Hackerone: "jardani101"
 
 shodan_api_key: "byVaAzNjWhaPB59X6TvCiTAvsgaPoXeh"
 rate_limit: 5
