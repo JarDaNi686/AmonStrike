@@ -63,6 +63,17 @@ class AmonStrikePipeline:
             self._step15_llm_memory,
         ]
 
+        # Initialize Pentesting Task Tree
+        try:
+            from core.task_tree import PentestTaskTree
+            self.ptt = PentestTaskTree(
+                self.target,
+                str(self.output_dir / "ptt_session.json")
+            )
+            self.log(f"PTT: {self.ptt.summary()['total']} tasks from previous session", "i")
+        except Exception:
+            self.ptt = None
+
         for step in steps:
             try:
                 step()
@@ -434,6 +445,22 @@ class AmonStrikePipeline:
             new_findings = result.get("findings", [])
             self.state["findings"].extend(new_findings)
             self.log(f"Automate: {len(new_findings)} additional findings", "+")
+
+        # Multi-agent validation: exploit proof + business logic + MITRE mapping
+        try:
+            from core.agents import AgentOrchestrator
+            sessions = self.state.get("sessions", [])
+            orch = AgentOrchestrator(self.target, sessions)
+            agent_result = orch.run(self.state.get("findings", []))
+            self.state["findings"] = agent_result["findings"]
+            self.state["app_model"] = agent_result.get("app_model", {})
+            dropped = agent_result.get("dropped", 0)
+            confirmed = agent_result.get("confirmed", 0)
+            if dropped:
+                self.log(f"Agents: {dropped} unproven findings dropped", "i")
+            self.log(f"Agents: {confirmed} findings with proof, MITRE ATT&CK mapped", "+")
+        except Exception as e:
+            self.log(f"Agents: {e}", "~")
         except Exception as e:
             self.log(f"Automate error: {e}", "~")
 
