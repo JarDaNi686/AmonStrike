@@ -1,0 +1,48 @@
+program:
+  handle: eternal
+  platform: hackerone
+  h1_username: "YOUR_H1_USERNAME"
+
+required_headers:
+  X-Hackerone: "YOUR_H1_USERNAME"
+
+shodan_api_key: "byVaAzNjWhaPB59X6TvCiTAvsgaPoXeh"
+rate_limit: 5
+delay_between_requests: 0.3
+
+priority_modules:
+  - sqli
+  - idor
+  - ssrf
+  - xss
+  - command_injection
+  - ssti
+  - lfi
+  - nosql_injection
+  - jwt_deep
+  - account_takeover
+  - file_upload
+  - graphql_deep
+  - deserialization
+
+skip_modules:
+  - headers
+  - clickjacking
+  - rate_limit
+  - ssl_tls
+  - cookies
+  - email_injection
+  - formula_injection
+  - vhost_enum
+  - error_disclosure
+
+tier1: ["*.zomato.com","*.zomans.com","*.runnr.in","blinkit.com"]
+tier2: ["*.blinkit.com","*.hyperpure.com","*.grofer.io","*.grofers.com"]
+tier3: ["*.district.in","*.insider.in","*.eternal.com"]
+
+campaign:
+  type: sqli
+  multiplier: 1.5
+  ends: "2026-09-13"
+  first_blood_critical: 500
+  first_blood_high: 250

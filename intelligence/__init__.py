@@ -408,6 +408,34 @@ class RealAttackVectors:
         return findings
 
 
+def shodan_recon(domain: str, api_key: str) -> dict:
+    """Query Shodan for target infrastructure info."""
+    try:
+        import requests
+        result = {"ports":[],"vulns":[],"ips":[],"hostnames":[]}
+        r = requests.get(
+            f"https://api.shodan.io/shodan/host/search",
+            params={"key": api_key, "query": f"hostname:{domain}", "limit": 20},
+            timeout=15
+        )
+        if r.status_code == 200:
+            data = r.json()
+            for match in data.get("matches",[]):
+                ip = match.get("ip_str","")
+                port = match.get("port",0)
+                vulns = list(match.get("vulns",{}).keys())
+                hostnames = match.get("hostnames",[])
+                if ip: result["ips"].append(ip)
+                if port: result["ports"].append(f"{ip}:{port}")
+                result["vulns"].extend(vulns)
+                result["hostnames"].extend(hostnames)
+            result["vulns"] = list(set(result["vulns"]))
+            result["ips"]   = list(set(result["ips"]))
+        return result
+    except Exception:
+        return {}
+
+
 class IntelligenceOrchestrator:
     def __init__(self, target, output_dir=""):
         self.target          = target
