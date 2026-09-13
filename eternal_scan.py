@@ -191,13 +191,42 @@ def scan_target(target: str, h1_username: str,
     )
 
     # Override modules based on program rules
-    pipeline.state["skip_modules"]    = OOS_MODULES
+    pipeline.state["skip_modules"]     = OOS_MODULES
     pipeline.state["priority_modules"] = PRIORITY_MODULES
     pipeline.state["required_headers"] = required_headers
     pipeline.state["shodan_key"]       = SHODAN_API_KEY
     pipeline.state["tier"]             = tier
     pipeline.state["bounty_multiplier"]= multiplier
     pipeline.state["scope"]            = scope
+
+    # Run aggressive surface discovery FIRST
+    print(f"\n  [*] Running aggressive surface discovery...")
+    try:
+        import requests, urllib3; urllib3.disable_warnings()
+        s = requests.Session(); s.verify = False
+        s.headers.update(required_headers)
+        from core.surface_discovery import AggressiveSurfaceDiscovery
+        disc = AggressiveSurfaceDiscovery(target, s, required_headers)
+        surface = disc.run()
+        pipeline.state["endpoints"] = surface.get("endpoints", [])
+        pipeline.state["js_files"]  = surface.get("js_files", [])
+        pipeline.state["api_calls"] = surface.get("api_calls", [])
+        # Pre-populate findings with immediate interesting items
+        for item in surface.get("interesting", []):
+            if item.get("type") == "possible_secret":
+                pipeline.state.setdefault("findings", []).append({
+                    "title":       "Hardcoded Secret in JS File",
+                    "severity":    "HIGH",
+                    "module":      "credentials",
+                    "url":         item.get("source",""),
+                    "description": "Potential API key or secret found hardcoded in JavaScript.",
+                    "evidence":    f"Value: {item.get('value','')}",
+                    "remediation": "Remove secrets from client-side JS. Use server-side environment variables.",
+                    "cve":         "CWE-798",
+                })
+        print(f"  [+] Surface: {len(pipeline.state['endpoints'])} endpoints found")
+    except Exception as e:
+        print(f"  [!] Surface discovery error: {e}")
 
     # Inject required header into all module requests
     # Patch session to always add X-Hackerone header

@@ -50,6 +50,7 @@ class AmonStrikePipeline:
             self._step02_recon,
             self._step03_llm_analyze,
             self._step04_crawl,
+            self._step04b_surface_discovery,
             self._step05_auth,
             self._step06_intelligence,
             self._step07_attack,
@@ -354,6 +355,56 @@ class AmonStrikePipeline:
             self.log(f"Intelligence partial: {e}", "~")
 
     # ── STEP 07: Attack Engine ────────────────────────────────
+    def _step04b_surface_discovery(self):
+        """Aggressive surface discovery - finds real API endpoints."""
+        self.log("Step 04b: Aggressive Surface Discovery")
+        try:
+            from core.surface_discovery import AggressiveSurfaceDiscovery
+            import requests, urllib3; urllib3.disable_warnings()
+            s = requests.Session(); s.verify = False
+            s.headers.update({
+                "User-Agent": "Mozilla/5.0",
+                "X-Hackerone": "jardani101",
+            })
+            # Add any required headers from config
+            for h, v in self.state.get("required_headers", {}).items():
+                s.headers[h] = v
+
+            disc   = AggressiveSurfaceDiscovery(self.target, s,
+                         self.state.get("required_headers", {}))
+            result = disc.run()
+
+            # Merge discovered endpoints
+            existing = set(self.state.get("endpoints", []))
+            new_eps  = set(result.get("endpoints", []))
+            api_eps  = set(result.get("api_calls", []))
+            all_eps  = existing | new_eps | api_eps
+            self.state["endpoints"] = list(all_eps)
+
+            # Log interesting findings immediately
+            for item in result.get("interesting", []):
+                if item.get("type") == "sensitive_data_in_response":
+                    self.log(f"Sensitive data in: {item.get('url','')[:60]}", "!")
+                elif item.get("type") == "sensitive_file":
+                    self.log(f"Exposed file: {item.get('path','')} ({item.get('size',0)}b)", "!")
+                elif item.get("type") == "possible_secret":
+                    self.log(f"Possible secret in JS: {item.get('value','')[:40]}", "!")
+                    # Auto-add as finding
+                    self.state.setdefault("findings", []).append({
+                        "title":       "Possible Secret/API Key Exposed in JS File",
+                        "severity":    "HIGH",
+                        "module":      "intelligence",
+                        "url":         item.get("source",""),
+                        "description": "Potential secret found hardcoded in JavaScript file.",
+                        "evidence":    f"Value: {item.get('value','')}\nSource: {item.get('source','')}",
+                        "remediation": "Remove secrets from JS. Use environment variables.",
+                        "cve":         "CWE-798",
+                    })
+
+            self.log(f"Surface: {len(all_eps)} total endpoints discovered", "+")
+        except Exception as e:
+            self.log(f"Surface discovery: {e}", "~")
+
     def _step07_attack(self):
         self.log("Step 07: Attack Engine")
         import sys
@@ -393,7 +444,19 @@ class AmonStrikePipeline:
                 cls  = getattr(mod, cls_name)
                 inst = cls(url=self.target, timeout=10,
                           cookies=cookies, headers=headers)
-                inst.extra_endpoints = endpoints[:30]
+                # Pass ALL discovered endpoints - not just 30
+                all_endpoints = list(set(
+                    endpoints +
+                    self.state.get("endpoints", []) +
+                    list(self.state.get("api_calls", {}).keys() if isinstance(self.state.get("api_calls"), dict) else self.state.get("api_calls", []))
+                ))
+                inst.extra_endpoints = all_endpoints[:100]
+                # Apply WAF bypass headers
+                if self.state.get("waf_type"):
+                    inst._waf_type = self.state["waf_type"]
+                # Apply required headers (e.g. X-Hackerone)
+                for h, v in self.state.get("required_headers", {}).items():
+                    inst.session.headers[h] = v
                 result = inst.run()
                 n = len(result.get("findings", []))
                 for f in result.get("findings", []):

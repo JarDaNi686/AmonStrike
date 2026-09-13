@@ -48,9 +48,7 @@ class FalsePositiveValidator:
         """SSRF is real: response section must contain actual metadata, not URL."""
         # Extract only the response part (after "Response:" marker)
         response_text = evidence
-        for marker in ["Response:
-", "Response: 
-", "Response:"]:
+        for marker in ["Response:\n", "Response: \n", "Response:"]:
             if marker in evidence:
                 response_text = evidence[evidence.find(marker) + len(marker):]
                 break

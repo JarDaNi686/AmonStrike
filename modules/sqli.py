@@ -235,13 +235,17 @@ class SqliModule(BaseModule):
         return endpoints
 
     def _test_endpoint(self, ep: dict):
-        """Test one endpoint for SQLi."""
+        """Test one endpoint for SQLi — aggressive mode."""
         url    = ep["url"]
         method = ep["method"]
         params = ep["params"]
 
         if not params:
-            return
+            # Even without params, try common injectable params
+            for param in ["id","user_id","uid","order_id","item_id","search","q","page"]:
+                params[param] = "1"
+            if not params:
+                return
 
         for param_name, param_values in params.items():
             orig_val = param_values[0] if isinstance(param_values, list) else param_values
@@ -264,29 +268,45 @@ class SqliModule(BaseModule):
 
     def _inject(self, url: str, method: str, all_params: dict,
                 inject_param: str, payload: str):
-        """Send request with injected parameter."""
+        """Send request with injected parameter — aggressive WAF bypass."""
         test_params = {}
         for k, v in all_params.items():
             test_params[k] = v[0] if isinstance(v, list) else v
         test_params[inject_param] = payload
 
-        if method == "POST":
-            # Try form-encoded first, then JSON
-            r = self.post(url.split("?")[0], data=test_params)
-            if r and r.status_code == 415:  # Unsupported Media Type
-                r = self.post(url.split("?")[0], json=test_params)
-        else:
-            r = self.get(url.split("?")[0], params=test_params)
+        # Try multiple methods and encodings
+        for attempt_method, attempt_payload in [
+            (method, payload),
+            (method, payload.replace(" ", "/**/")),
+            (method, payload.replace("'", "%27")),
+        ]:
+            if attempt_method == "POST":
+                r = self.post(url.split("?")[0], data=test_params)
+                if not r or r.status_code == 415:
+                    r = self.post(url.split("?")[0], json=test_params)
+            else:
+                r = self.get(url.split("?")[0], params=test_params)
 
-        # 403 → try WAF bypass headers
-        if r and r.status_code == 403:
-            for bypass_hdrs in self.WAF_BYPASS_HEADERS[1:3]:
-                r2 = self.get(url.split("?")[0], params=test_params,
-                             headers=bypass_hdrs)
-                if r2 and r2.status_code != 403:
+            if not r:
+                continue
+
+            # Got a real response
+            if r.status_code not in [403, 429, 503]:
+                return r
+
+            # Blocked — try WAF bypass headers
+            for bypass_hdrs in getattr(self, 'WAF_BYPASS_HEADERS', [{}])[1:4]:
+                merged = dict(bypass_hdrs)
+                if attempt_method == "POST":
+                    r2 = self.post(url.split("?")[0], data=test_params,
+                                  headers=merged)
+                else:
+                    r2 = self.get(url.split("?")[0], params=test_params,
+                                 headers=merged)
+                if r2 and r2.status_code not in [403, 429, 503]:
                     return r2
 
-        return r
+        return r if 'r' in dir() else None
 
     def _is_sqli(self, text: str):
         """Check if response contains SQL error. Returns (db_type, pattern) or None."""
