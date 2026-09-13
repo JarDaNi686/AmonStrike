@@ -461,8 +461,6 @@ class AmonStrikePipeline:
             self.log(f"Agents: {confirmed} findings with proof, MITRE ATT&CK mapped", "+")
         except Exception as e:
             self.log(f"Agents: {e}", "~")
-        except Exception as e:
-            self.log(f"Automate error: {e}", "~")
 
     # ── STEP 09: Chain Engine ─────────────────────────────────
     def _step09_chain(self):
