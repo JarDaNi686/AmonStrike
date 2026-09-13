@@ -445,6 +445,8 @@ class AmonStrikePipeline:
             new_findings = result.get("findings", [])
             self.state["findings"].extend(new_findings)
             self.log(f"Automate: {len(new_findings)} additional findings", "+")
+        except Exception as e:
+            self.log(f"Automate error: {e}", "~")
 
         # Multi-agent validation: exploit proof + business logic + MITRE mapping
         try:
