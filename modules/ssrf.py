@@ -139,21 +139,41 @@ class SsrfModule(BaseModule):
                         self._report_ssrf(param, meta_url, r, "Redirect Chain")
 
     def _is_real_ssrf(self, response_text: str, baseline_text: str) -> bool:
-        """Verify SSRF is real."""
-        real_sigs = [
-            "ami-id","instance-id","AccessKeyId","SecretAccessKey",
-            "iam/security-credentials","computeMetadata","local-ipv4",
-            "placement","availability-zone","security-groups","instance-type",
-            "metadata.google.internal","169.254.169.254",
+        """Verify SSRF is real - response must contain ACTUAL metadata content."""
+        # These ONLY appear in real metadata responses, never in normal HTML pages
+        # Do NOT include URL strings like "computeMetadata" or "169.254.169.254"
+        # because those are in the payload and may be echoed in error pages
+        definitive_metadata = [
+            "ami-id",                    # AWS EC2 metadata
+            "instance-id",               # AWS EC2 metadata
+            "AccessKeyId",               # AWS IAM credentials
+            "SecretAccessKey",           # AWS IAM credentials
+            "Token",                     # AWS session token (with IAM context)
+            "local-ipv4",                # AWS EC2 network
+            "serviceAccounts",           # GCP metadata JSON
+            "email_gcp_sa",              # GCP service account
+            "scopes_list",               # GCP scopes
+            "project-id_meta",           # GCP project
+            "Microsoft.Compute",         # Azure metadata
+            "subscriptionId",            # Azure metadata
+            "resourceGroupName",         # Azure metadata
         ]
-        # Must contain real metadata
-        if not any(sig in response_text for sig in real_sigs):
+
+        # Response must contain definitive metadata (not just echoed URL)
+        has_real = any(sig in response_text for sig in definitive_metadata)
+        if not has_real:
             return False
-        # Must differ from baseline
+
+        # Response must differ meaningfully from baseline
         if baseline_text and len(baseline_text) > 100:
-            ratio = abs(len(response_text) - len(baseline_text)) / max(len(baseline_text),1)
-            if ratio < 0.03:
+            import hashlib
+            if hashlib.md5(response_text.encode()).hexdigest() == hashlib.md5(baseline_text.encode()).hexdigest():
                 return False
+            # If response is within 5% of baseline length = same page returned
+            ratio = abs(len(response_text) - len(baseline_text)) / max(len(baseline_text), 1)
+            if ratio < 0.05:
+                return False
+
         return True
 
     def _test_oob_ssrf(self) -> list:

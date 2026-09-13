@@ -148,20 +148,30 @@ class XssModule(BaseModule):
                 if MARKER in r.text:
                     # Reflected! Now determine context and find working payload
                     context = self._detect_context(r.text, MARKER)
-                    payload = self._payload_for_context(context)
+                    payloads_to_try = self._payload_for_context(context)
 
-                    # Verify payload works
-                    test_params[param_name] = payload
-                    if method == "POST":
-                        r2 = self.post(url.split("?")[0], data=test_params)
-                        if not r2:
-                            r2 = self.post(url.split("?")[0], json=test_params)
-                    else:
-                        r2 = self.get(url.split("?")[0], params=test_params)
+                    # Try each payload for this context
+                    confirmed_payload = None
+                    confirmed_r2 = None
+                    for payload in payloads_to_try:
+                        test_params[param_name] = payload
+                        if method == "POST":
+                            r2 = self.post(url.split("?")[0], data=test_params)
+                            if not r2:
+                                r2 = self.post(url.split("?")[0], json=test_params)
+                        else:
+                            r2 = self.get(url.split("?")[0], params=test_params)
+                        if r2 and payload in r2.text:
+                            confirmed_payload = payload
+                            confirmed_r2 = r2
+                            break
 
-                    if r2 and payload in r2.text:
-                        self._report(url, method, param_name, payload, r2, context)
+                    if confirmed_payload and confirmed_r2:
+                        self._report(url, method, param_name, confirmed_payload, confirmed_r2, context)
                         return
+                    
+                    # Use first payload for fallback attempts
+                    payload = payloads_to_try[0] if payloads_to_try else "<img src=x onerror=alert(1)>"
 
                     # Try WAF bypass variants
                     for waf_payload in WAF_XSS[:5]:

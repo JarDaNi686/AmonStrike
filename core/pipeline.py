@@ -422,6 +422,42 @@ class AmonStrikePipeline:
         except Exception as e:
             self.log(f"Custom attacks: {e}", "~")
 
+        # Nuclei scan - 12,000+ community templates
+        try:
+            import shutil
+            if shutil.which("nuclei"):
+                import subprocess, json as _json
+                nuclei_out = subprocess.run(
+                    ["nuclei", "-u", self.target, "-silent",
+                     "-severity", "critical,high,medium",
+                     "-json", "-timeout", "10", "-rate-limit", "10"],
+                    capture_output=True, text=True, timeout=120
+                )
+                for line in nuclei_out.stdout.strip().splitlines():
+                    try:
+                        n = _json.loads(line)
+                        findings.append({
+                            "title":       n.get("info",{}).get("name","Nuclei Finding"),
+                            "severity":    n.get("info",{}).get("severity","MEDIUM").upper(),
+                            "module":      "nuclei",
+                            "url":         n.get("matched-at", self.target),
+                            "description": n.get("info",{}).get("description",""),
+                            "evidence":    f"Template: {n.get('template-id','')}
+Matcher: {n.get('matcher-name','')}",
+                            "remediation": n.get("info",{}).get("remediation",""),
+                            "cve":         ",".join(n.get("info",{}).get("classification",{}).get("cve-id",[])),
+                            "timestamp":   datetime.now().isoformat(),
+                        })
+                    except Exception:
+                        pass
+                nuclei_count = len([f for f in findings if f.get("module")=="nuclei"])
+                if nuclei_count:
+                    self.log(f"Nuclei: {nuclei_count} findings from 12k templates", "+")
+            else:
+                self.log("Nuclei not installed — install: go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest", "~")
+        except Exception as e:
+            self.log(f"Nuclei: {e}", "~")
+
         self.state["findings"] = findings
         self.log(f"Attack: {len(findings)} real findings", "+")
 
