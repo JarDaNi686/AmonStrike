@@ -45,25 +45,28 @@ class FalsePositiveValidator:
     # ── Per-module validators ──────────────────────────────────
 
     def _check_ssrf(self, f: dict, evidence: str) -> bool:
-        """SSRF is real only if response contains actual metadata content."""
-        real_metadata = [
-            "ami-id", "instance-id", "AccessKeyId", "SecretAccessKey",
-            "iam/security-credentials", "computeMetadata", "local-ipv4",
-            "placement", "availability-zone", "security-groups",
-            "instance-type", "metadata.google.internal",
-            "169.254.169.254", "opc/v1/instance",
-        ]
-        # Response must contain real metadata marker
-        has_metadata = any(sig in evidence for sig in real_metadata)
-        if not has_metadata:
+        """SSRF is real: response section must contain actual metadata, not URL."""
+        # Extract only the response part (after "Response:" marker)
+        response_text = evidence
+        for marker in ["Response:
+", "Response: 
+", "Response:"]:
+            if marker in evidence:
+                response_text = evidence[evidence.find(marker) + len(marker):]
+                break
+
+        # Homepage = false positive
+        homepage = ["<!DOCTYPE html>", "<html>", "<title>", "<head>", "<meta", "favicon"]
+        if sum(1 for h in homepage if h in response_text) >= 2:
             return False
 
-        # Response must differ from baseline
-        if self._is_same_as_baseline(evidence):
-            return False
+        # Real metadata content (never appears in normal HTML pages)
+        real = ["ami-id", "instance-id", "AccessKeyId", "SecretAccessKey",
+                "local-ipv4", "serviceAccounts", "subscriptionId",
+                "resourceGroupName", "instance-type", "availability-zone"]
+        return any(sig in response_text for sig in real)
 
-        return True
-
+    
     def _check_command_injection(self, f: dict, evidence: str) -> bool:
         """RCE confirmed by real command output patterns."""
         # Real RCE: uid=33(www-data) has digits then parens

@@ -55,6 +55,7 @@ class AmonStrikePipeline:
             self._step07_attack,
             self._step08_automate,
             self._step09_chain,
+            self._step_iteration_loop,
             self._step10_deduplicate,
             self._step11_screenshot,
             self._step12_report,
@@ -171,6 +172,23 @@ class AmonStrikePipeline:
                         alive.add(line.strip())
             except Exception:
                 pass
+
+        # Wayback Machine - historical URLs with params
+        try:
+            import urllib.request
+            domain = urlparse(self.target).netloc
+            wb_url = f"https://web.archive.org/cdx/search/cdx?url={domain}/*&output=text&fl=original&collapse=urlkey&limit=100"
+            req = urllib.request.Request(wb_url, headers={"User-Agent":"Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                wayback_urls = resp.read().decode().strip().splitlines()
+                # Only keep URLs with params (attack surface)
+                for u in wayback_urls:
+                    if "?" in u and urlparse(u).netloc == domain:
+                        subdomains.add(urlparse(u).netloc)
+                        alive.add(u)
+                self.log(f"Wayback: {len(wayback_urls)} historical URLs", "+")
+        except Exception:
+            pass
 
         self.state["subdomains"] = list(subdomains)
         self.state["alive_targets"] = list(alive)
@@ -516,6 +534,39 @@ class AmonStrikePipeline:
             self.log(f"Chain engine: {e}", "~")
 
     # ── STEP 10: Duplicate Checker ────────────────────────────
+    def _step_iteration_loop(self):
+        """PentestGPT-style iteration - keep running until no new findings."""
+        if not hasattr(self, 'ptt') or not self.ptt:
+            return
+        pending = self.ptt.get_next_tasks(limit=5)
+        if not pending:
+            return
+        self.log(f"Iteration loop: {len(pending)} follow-up tasks from PTT", "i")
+        import sys; sys.path.insert(0, '.')
+        for task in pending[:3]:
+            try:
+                mod_path = f"modules.{task.module}"
+                cls_name = "".join(w.capitalize() for w in task.module.split("_")) + "Module"
+                mod = __import__(mod_path, fromlist=[cls_name])
+                cls = getattr(mod, cls_name)
+                sessions = self.state.get("sessions", [])
+                cookies = sessions[0]["cookies"] if sessions else {}
+                headers = sessions[0]["headers"] if sessions else {}
+                inst = cls(url=task.target_url, timeout=8, cookies=cookies, headers=headers)
+                res = inst.run()
+                new_findings = res.get("findings", [])
+                for f in new_findings:
+                    f.setdefault("module", task.module)
+                    f.setdefault("timestamp", datetime.now().isoformat())
+                    f["spawned_by"] = task.title
+                self.state["findings"].extend(new_findings)
+                self.ptt.complete_task(task.id, new_findings[0] if new_findings else None)
+                if new_findings:
+                    self.log(f"  PTT task '{task.title[:40]}': {len(new_findings)} findings", "+")
+            except Exception as e:
+                if self.debug: self.log(f"PTT task error: {e}", "!")
+                self.ptt.fail_task(task.id, str(e))
+
     def _step10_deduplicate(self):
         self.log("Step 10: Duplicate Checker")
         findings = self.state.get("findings", [])

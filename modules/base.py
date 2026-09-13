@@ -42,6 +42,23 @@ class BaseModule:
 
     # Default rate limit: requests per second
     RATE_LIMIT  = 10
+
+    WAF_BYPASS_HEADERS = [
+        {},
+        {"X-Forwarded-For": "127.0.0.1", "X-Real-IP": "127.0.0.1"},
+        {"X-Originating-IP": "127.0.0.1", "X-Remote-IP": "127.0.0.1"},
+        {"CF-Connecting-IP": "127.0.0.1", "True-Client-IP": "127.0.0.1"},
+        {"X-Forwarded-Host": "localhost", "X-Host": "localhost"},
+    ]
+
+    def _get_waf_bypass_headers(self) -> dict:
+        waf = getattr(self, "_waf_type", "")
+        base = {"X-Forwarded-For": "127.0.0.1", "X-Real-IP": "127.0.0.1"}
+        if waf == "cloudflare":
+            base.update({"CF-Connecting-IP":"127.0.0.1","True-Client-IP":"127.0.0.1"})
+        elif waf == "akamai":
+            base["Akamai-Origin-Hop"] = "1"
+        return base
     MAX_RETRIES = 3
     RETRY_DELAY = 1.0
 
