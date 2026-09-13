@@ -442,8 +442,7 @@ class AmonStrikePipeline:
                             "module":      "nuclei",
                             "url":         n.get("matched-at", self.target),
                             "description": n.get("info",{}).get("description",""),
-                            "evidence":    f"Template: {n.get('template-id','')}
-Matcher: {n.get('matcher-name','')}",
+                            "evidence":    "Template: " + n.get('template-id','') + "\nMatcher: " + n.get('matcher-name',''),
                             "remediation": n.get("info",{}).get("remediation",""),
                             "cve":         ",".join(n.get("info",{}).get("classification",{}).get("cve-id",[])),
                             "timestamp":   datetime.now().isoformat(),
