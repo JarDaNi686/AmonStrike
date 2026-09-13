@@ -447,7 +447,7 @@ class IntelligenceOrchestrator:
         self.session.verify = False
         self.session.headers["User-Agent"] = "Mozilla/5.0"
 
-    def run(self):
+    def run(self) -> dict:
         try:
             r        = self.session.get(self.target, timeout=15)
             analysis = self.analyzer.analyze(
@@ -455,6 +455,8 @@ class IntelligenceOrchestrator:
         except Exception:
             analysis = {}
         strategy             = self.strategy_engine.build_strategy(analysis)
+        if not isinstance(strategy, dict):
+            strategy = {}
         strategy["waf"]      = analysis.get("waf","")
         strategy["tech"]     = analysis.get("technology",[])
         strategy["endpoints"]= analysis.get("endpoints",[])
