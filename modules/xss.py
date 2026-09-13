@@ -194,7 +194,8 @@ class XssModule(BaseModule):
                                 before = r.text[max(0,marker_pos-100):marker_pos]
                                 # Inside an open tag = exploitable
                                 if "<" in before and ">" not in before[-20:]:
-                                    self._report(url, method, param_name,
+                                    # Only report attr-context reflections if inside actual HTML tag
+                                            self._report(url, method, param_name,
                                                 marker_p, r, context, reflection_only=True)
                     break
 
@@ -261,7 +262,7 @@ class XssModule(BaseModule):
     def _report(self, url, method, param, payload, resp, context,
                 reflection_only=False):
         if reflection_only:
-            sev  = "MEDIUM"
+            sev  = "INFO"
             title= f"Reflected Input (Potential XSS) — Parameter '{param}' [{method}]"
             desc = (f"User input via '{param}' is reflected in the response without encoding "
                     f"(context: {context}). Manual verification recommended to confirm XSS.")
