@@ -418,18 +418,23 @@ if __name__ == "__main__":
     cookies_a = {}
     cookies_b = {}
 
-    if args.auto:
-        from core.browser_session import capture_session
-        print("[*] Grabbing claude.ai session from Firefox...")
-        cookies_a = capture_session("claude.ai")
-        if not cookies_a:
-            print("[!] No claude.ai session in Firefox")
-            print("[!] Login to claude.ai first, then run again")
-            sys.exit(1)
-    elif args.session_a:
+    from core.session_manager import SessionManager
+    sm = SessionManager()
+
+    if args.session_a:
         cookies_a = json.loads(args.session_a)
+    else:
+        # Auto-grab from browser
+        print("[*] Auto-detecting claude.ai sessions...")
+        sessions = sm.get_multi("claude.ai", count=2)
+        cookies_a = sessions[0] if len(sessions) > 0 else {}
+        cookies_b = sessions[1] if len(sessions) > 1 else {}
 
     if args.session_b:
         cookies_b = json.loads(args.session_b)
+
+    if not cookies_a:
+        sm._alert_missing("claude.ai", "user")
+        sys.exit(1)
 
     run_scan(cookies_a, cookies_b)
