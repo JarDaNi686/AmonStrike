@@ -411,6 +411,8 @@ class ProofEngine:
         return ""
 
 
+from core.brain import Brain
+
 class MasterEngine:
     """
     One URL in. Everything out.
@@ -424,6 +426,7 @@ class MasterEngine:
         self.username = h1_username
         self.session  = self._build_session()
         self.rl       = AdaptiveRateLimiter()
+        self.brain    = Brain()
 
     def _build_session(self) -> requests.Session:
         s = requests.Session()
@@ -474,7 +477,12 @@ class MasterEngine:
 
         # Phase 4: Adaptive attack
         print("\n[Phase 4] Adaptive attack engine...")
-        priority = model.get("attack_priority",[
+        brain_plan = self.brain.plan_attack(
+            self.url,
+            model.get("tech",[]),
+            model.get("purpose","")
+        )
+        priority = brain_plan.get("priority_modules") or model.get("attack_priority",[
             "sqli","idor","ssrf","xss","cors","auth","jwt_deep",
             "graphql_deep","lfi","ssti","command_injection",
             "nosql_injection","file_upload","deserialization",
@@ -515,6 +523,12 @@ class MasterEngine:
             print(f"    [{f['severity']}] {f['title'][:60]}")
 
         # Phase 8: Generate H1 portal
+        chains = self.brain.chain_findings(proven)
+        if chains:
+            print(f"\n  [+] {len(chains)} vulnerability chains found")
+            for c in chains:
+                print(f"     {c.get('name','')} → {c.get('combined_severity','')} (~${c.get('bounty_estimate',0):,})")
+        self.brain.learn(proven, self.url, model.get("tech",[]))
         all_reportable = proven + [f for f in unproven
                                    if f.get("severity") in ["CRITICAL","HIGH"]]
         if all_reportable:
