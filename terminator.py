@@ -297,7 +297,7 @@ class Terminator:
                 print(f"  {color}{s}: {c}\033[0m")
 
         print()
-        for f in sorted(self.all_findings, key=lambda x: ["CRITICAL","HIGH","MEDIUM","LOW"].index(x.get("severity","LOW"))):
+        for f in sorted(self.all_findings, key=lambda x: ["CRITICAL","HIGH","MEDIUM","LOW","INFO"].index(x.get("severity","INFO") if x.get("severity","INFO") in ["CRITICAL","HIGH","MEDIUM","LOW","INFO"] else "INFO")):
             sev_color = {"CRITICAL":"\033[91m","HIGH":"\033[93m","MEDIUM":"\033[96m","LOW":"\033[92m"}.get(f.get("severity","LOW"),"")
             print(f"  {sev_color}[{f['severity']}] {f.get('title','')[:65]}\033[0m")
             print(f"         Terminal: {f.get('terminal','')} | {f.get('url','')[:50]}")
