@@ -526,6 +526,25 @@ class MasterEngine:
         for f in unproven:
             print(f"    [{f['severity']}] {f['title'][:60]}")
 
+        # Phase 7b: Autonomous exploitation + screenshot proof
+        print("\n[Phase 7b] Autonomous exploitation + screenshots...")
+        try:
+            from core.exploit_engine import AutonomousExploiter, ProofPackage
+            exploiter = AutonomousExploiter(
+                self.url,
+                dict(self.session.cookies)
+            )
+            proven, unproven = exploiter.prove_all(raw_findings)
+            # Build proof packages
+            packages = [ProofPackage(f, self.url).build() for f in proven]
+            self.state_proven   = proven
+            self.state_unproven = unproven
+            self.state_packages = packages
+        except Exception as e:
+            print(f"  [!] Exploit engine: {e}")
+            proven   = [f for f in raw_findings if f.get("severity") in ["CRITICAL","HIGH"]]
+            unproven = [f for f in raw_findings if f.get("severity") not in ["CRITICAL","HIGH"]]
+
         # Phase 8: Generate H1 portal
         chains = self.brain.chain_findings(proven)
         if chains:
