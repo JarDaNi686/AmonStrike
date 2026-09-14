@@ -1,147 +1,191 @@
-#!/usr/bin/env python3
 """
 AmonStrike — Browser Session Capture
-Grabs session cookies from your logged-in Firefox on Kali.
-No manual copy-paste needed.
+Grabs cookies from logged-in Firefox/Chrome on Kali.
 """
-import os, json, sqlite3, shutil, tempfile, glob
+import os, json, sqlite3, shutil, tempfile, glob, subprocess
 from pathlib import Path
 
-def get_firefox_sessions(domain_filter: str = "") -> dict:
-    """Extract cookies from Firefox profiles on Kali."""
-    results = {}
 
-    # Firefox profile locations on Kali/Linux
-    profiles_base = [
+def find_firefox_profiles() -> list:
+    """Find all Firefox profile directories on Kali."""
+    paths = []
+    
+    # Common locations
+    search_dirs = [
         Path.home() / ".mozilla/firefox",
         Path("/root/.mozilla/firefox"),
+        Path("/home") ,
     ]
-
-    for base in profiles_base:
+    
+    # Also search all home directories
+    try:
+        for user_home in Path("/home").iterdir():
+            search_dirs.append(user_home / ".mozilla/firefox")
+    except Exception:
+        pass
+    
+    for base in search_dirs:
         if not base.exists():
             continue
-        for profile in base.glob("*.default*"):
-            cookies_db = profile / "cookies.sqlite"
-            if not cookies_db.exists():
-                continue
-
-            # Copy DB (Firefox locks it while open)
-            tmp = tempfile.mktemp(suffix=".sqlite")
-            shutil.copy2(cookies_db, tmp)
-
-            try:
-                con = sqlite3.connect(tmp)
-                cur = con.cursor()
-                query = "SELECT host, name, value, path, expiry FROM moz_cookies"
-                if domain_filter:
-                    query += f" WHERE host LIKE '%{domain_filter}%'"
-                rows = cur.fetchall()
-                con.execute(query)
-                rows = con.fetchall()
-                con.close()
-                for host, name, value, path, expiry in rows:
-                    h = host.lstrip(".")
-                    results.setdefault(h, {})[name] = value
-            except Exception as e:
-                pass
-            finally:
-                os.unlink(tmp)
-
-    return results
+        # Find profile directories
+        for pattern in ["*.default*", "*.esr", "*release*"]:
+            for profile in base.glob(pattern):
+                cookies_db = profile / "cookies.sqlite"
+                if cookies_db.exists():
+                    paths.append(cookies_db)
+    
+    return paths
 
 
-def get_chrome_sessions(domain_filter: str = "") -> dict:
-    """Extract cookies from Chrome/Chromium on Kali."""
+def read_firefox_cookies(domain_filter: str = "") -> dict:
+    """Read cookies from all Firefox profiles."""
     results = {}
-    cookie_paths = [
-        Path.home() / ".config/google-chrome/Default/Cookies",
-        Path.home() / ".config/chromium/Default/Cookies",
-        Path("/root/.config/google-chrome/Default/Cookies"),
-    ]
-    for cookies_db in cookie_paths:
-        if not cookies_db.exists():
-            continue
-        tmp = tempfile.mktemp(suffix=".sqlite")
-        shutil.copy2(cookies_db, tmp)
+    
+    profile_dbs = find_firefox_profiles()
+    
+    if not profile_dbs:
+        # Try finding with find command
         try:
-            con = sqlite3.connect(tmp)
-            query = "SELECT host_key, name, value FROM cookies"
-            if domain_filter:
-                query += f" WHERE host_key LIKE '%{domain_filter}%'"
-            rows = con.execute(query).fetchall()
-            con.close()
-            for host, name, value in rows:
-                results.setdefault(host.lstrip("."), {})[name] = value
+            out = subprocess.run(
+                ["find", "/", "-name", "cookies.sqlite", 
+                 "-path", "*/firefox/*", "-not", "-path", "*/snap/*"],
+                capture_output=True, text=True, timeout=10
+            ).stdout
+            for line in out.strip().splitlines():
+                p = Path(line.strip())
+                if p.exists():
+                    profile_dbs.append(p)
         except Exception:
             pass
+    
+    for cookies_db in profile_dbs:
+        tmp = tempfile.mktemp(suffix=".sqlite")
+        try:
+            shutil.copy2(str(cookies_db), tmp)
+            con = sqlite3.connect(tmp)
+            
+            if domain_filter:
+                base = domain_filter.replace("https://","").replace("http://","")
+                base = ".".join(base.split(".")[-2:])
+                rows = con.execute(
+                    "SELECT host, name, value FROM moz_cookies WHERE host LIKE ?",
+                    (f"%{base}%",)
+                ).fetchall()
+            else:
+                rows = con.execute(
+                    "SELECT host, name, value FROM moz_cookies"
+                ).fetchall()
+            
+            con.close()
+            
+            for host, name, value in rows:
+                h = host.lstrip(".")
+                results.setdefault(h, {})[name] = value
+                
+        except Exception as e:
+            pass
         finally:
-            os.unlink(tmp)
+            try:
+                os.unlink(tmp)
+            except Exception:
+                pass
+    
     return results
 
 
 def capture_session(target_domain: str) -> dict:
     """
-    Capture session from any logged-in browser on Kali.
-    Returns cookies dict ready for AmonStrike.
+    Capture session cookies for a domain.
+    Returns flat cookie dict ready for requests.
     """
     domain = target_domain.replace("https://","").replace("http://","").split("/")[0]
-    base   = ".".join(domain.split(".")[-2:])  # e.g. zomato.com
-
+    base   = ".".join(domain.split(".")[-2:])
+    
     print(f"[*] Capturing session cookies for {base}...")
-
+    
+    # Try Firefox
     all_cookies = {}
-    for browser, fn in [("Firefox", get_firefox_sessions),
-                        ("Chrome",  get_chrome_sessions)]:
-        cookies = fn(base)
-        for host, cookie_dict in cookies.items():
-            if base in host:
-                all_cookies.update(cookie_dict)
-                print(f"  [+] {browser}: {len(cookie_dict)} cookies from {host}")
+    ff_cookies  = read_firefox_cookies(base)
+    
+    for host, cookie_dict in ff_cookies.items():
+        if base in host:
+            all_cookies.update(cookie_dict)
+    
+    if all_cookies:
+        print(f"  [+] Firefox: {len(all_cookies)} cookies from {base}")
+        return all_cookies
+    
+    # Try Chrome/Chromium
+    chrome_paths = [
+        Path.home() / ".config/google-chrome/Default/Cookies",
+        Path.home() / ".config/chromium/Default/Cookies",
+        Path("/root/.config/google-chrome/Default/Cookies"),
+        Path("/root/.config/chromium/Default/Cookies"),
+    ]
+    
+    for cookie_path in chrome_paths:
+        if not cookie_path.exists():
+            continue
+        tmp = tempfile.mktemp(suffix=".sqlite")
+        try:
+            shutil.copy2(str(cookie_path), tmp)
+            con = sqlite3.connect(tmp)
+            rows = con.execute(
+                "SELECT host_key, name, value FROM cookies WHERE host_key LIKE ?",
+                (f"%{base}%",)
+            ).fetchall()
+            con.close()
+            for host, name, value in rows:
+                all_cookies[name] = value
+            if all_cookies:
+                print(f"  [+] Chrome: {len(all_cookies)} cookies")
+                return all_cookies
+        except Exception:
+            pass
+        finally:
+            try: os.unlink(tmp)
+            except: pass
+    
+    # Last resort: ask user to paste cookies manually
+    print(f"  [!] Could not find {base} cookies automatically")
+    print(f"\n  Manual method:")
+    print(f"  1. Open Firefox → F12 → Network tab")
+    print(f"  2. Refresh claude.ai page")  
+    print(f"  3. Click any request → Headers → copy 'Cookie:' value")
+    print(f"  4. Run: python3 anthropic_scan.py --cookies 'PASTE_HERE'")
+    
+    return {}
 
-    if not all_cookies:
-        print(f"  [!] No cookies found. Make sure you're logged into {base} in Firefox/Chrome on Kali.")
-        return {}
 
-    print(f"  [+] Total: {len(all_cookies)} cookies captured")
-    return all_cookies
-
-
-def get_local_storage(target_domain: str) -> dict:
-    """Try to extract localStorage tokens (JWT etc) from browser storage."""
-    domain = target_domain.replace("https://","").replace("http://","").split("/")[0]
-    storage = {}
-    # Firefox localStorage location
-    storage_path = Path.home() / ".mozilla/firefox"
-    for profile in storage_path.glob("*.default*"):
-        ls_dir = profile / "storage/default"
-        for d in ls_dir.glob(f"*{domain}*"):
-            ls_db = d / "ls/data.sqlite"
-            if ls_db.exists():
-                try:
-                    tmp = tempfile.mktemp(suffix=".sqlite")
-                    shutil.copy2(ls_db, tmp)
-                    con = sqlite3.connect(tmp)
-                    rows = con.execute("SELECT key, utf16_length, value FROM data").fetchall()
-                    con.close()
-                    os.unlink(tmp)
-                    for key, _, value in rows:
-                        storage[key] = str(value)[:200]
-                except Exception:
-                    pass
-    return storage
+def list_all_domains() -> list:
+    """List all domains that have cookies in Firefox."""
+    cookies = read_firefox_cookies()
+    domains = set()
+    for host in cookies:
+        h = host.lstrip(".")
+        parts = h.split(".")
+        if len(parts) >= 2:
+            domains.add(".".join(parts[-2:]))
+    return sorted(domains)
 
 
 if __name__ == "__main__":
     import sys
-    target = sys.argv[1] if len(sys.argv) > 1 else "zomato.com"
-    cookies = capture_session(target)
-    if cookies:
-        # Print as credentials JSON for terminator
-        creds = json.dumps([{"cookies": cookies, "role": "user"}])
-        print(f"\n[+] Use with terminator:")
-        print(f"sudo python3 terminator.py --target https://{target} --credentials '{creds}'")
-        # Also save to file
-        out = Path("output/session_cookies.json")
-        out.parent.mkdir(exist_ok=True)
-        out.write_text(json.dumps({"domain": target, "cookies": cookies}, indent=2))
-        print(f"[+] Saved to: {out}")
+    
+    if len(sys.argv) > 1 and sys.argv[1] == "list":
+        print("Domains with cookies in Firefox:")
+        for d in list_all_domains():
+            print(f"  {d}")
+    elif len(sys.argv) > 1:
+        domain = sys.argv[1]
+        cookies = capture_session(domain)
+        if cookies:
+            print(f"\n[+] Cookies for {domain}:")
+            for k, v in list(cookies.items())[:10]:
+                print(f"  {k}: {v[:40]}...")
+            print(f"\n[+] Use with scanner:")
+            print(f"  sudo python3 anthropic_scan.py --session-a '{json.dumps(cookies)}'")
+    else:
+        print("Usage:")
+        print("  python3 core/browser_session.py claude.ai")
+        print("  python3 core/browser_session.py list")
