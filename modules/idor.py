@@ -136,6 +136,18 @@ class IdorModule(BaseModule):
             sensitive = self._detect_sensitive(r_test.text)
             sev = "CRITICAL" if sensitive else "HIGH"
 
+            # REJECT: public HTML pages without sensitive data
+            # army.mil/article/N are public news articles, not IDOR
+            public_indicators = [
+                "<!DOCTYPE html>", "<html", "og:title",
+                "apple-itunes-app", "meta charset", "viewport"
+            ]
+            is_public_html = (
+                sum(1 for p in public_indicators if p in r_test.text) >= 3
+            )
+            if is_public_html and not sensitive:
+                continue  # Skip public content with no sensitive data
+
             self.add_finding(
                 title       = f"IDOR — Unauthorized Access via ID Manipulation: {urlparse(url).path}",
                 severity    = sev,

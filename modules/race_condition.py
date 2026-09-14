@@ -116,7 +116,8 @@ class RaceConditionModule(BaseModule):
                 n=self.RACE_THREADS
             )
 
-            successes = [r for r in results if r.get("status") not in [429,503]]
+            successes = [r for r in results if r.get("status") in [200,201]]
+            # Need at least 2 real 200s to confirm race condition
             if len(successes) > 1:
                 self.add_finding(
                     title=f"Rate Limit Bypass via Race Condition at {path}",
