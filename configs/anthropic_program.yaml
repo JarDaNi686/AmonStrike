@@ -1,0 +1,68 @@
+program:
+  handle: anthropic
+  platform: hackerone
+  h1_username: jardani101
+
+required_headers:
+  X-HackerOne-Handle: jardani101
+
+test_email_domain: "@wearehackerone.com"
+
+rate_limit: 3
+delay: 1.0
+
+# Core assets - $7,500-$10,000
+core_assets:
+  - "claude.ai"
+  - "api.anthropic.com"
+  - "console.anthropic.com"
+  - "*.anthropic.com"
+
+# Non-core - $1,000-$5,000
+non_core_assets:
+  - "*.anthropic.com"
+  - "anthropic.com"
+
+# What pays at CRITICAL ($7,500-$10,000)
+critical_targets:
+  - "Auth bypass on API key management"
+  - "IDOR accessing other org API keys"
+  - "IDOR accessing other users conversations"
+  - "Account takeover via password reset"
+  - "SSRF from claude.ai to internal services"
+  - "RCE via file processing"
+  - "Privilege escalation between organizations"
+  - "OAuth token theft"
+
+# Priority modules for this program
+priority_modules:
+  - idor           # API key IDOR, conversation IDOR
+  - auth           # Auth bypass, session issues
+  - oauth          # OAuth flow vulnerabilities
+  - account_takeover
+  - ssrf           # SSRF to internal Anthropic infra
+  - xss            # Stored XSS in claude.ai
+  - cors           # CORS on api.anthropic.com
+  - jwt_deep       # JWT issues on API tokens
+  - race_condition # Race on account operations
+  - graphql_deep   # If GraphQL endpoints exist
+  - csrf           # CSRF on sensitive actions
+
+# Out of scope
+skip_modules:
+  - rate_limit
+  - headers
+  - clickjacking
+  - ssl_tls
+  - cookies
+  - error_disclosure
+
+oos_findings:
+  - "Missing HttpOnly"
+  - "Rate limiting"
+  - "Clickjacking"
+  - "SSL/TLS"
+  - "Brute force"
+  - "Denial of service"
+  - "jailbreak"
+  - "model safety"
