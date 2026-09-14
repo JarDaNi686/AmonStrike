@@ -155,6 +155,18 @@ def get_tier(url: str) -> tuple:
     return (3, 1.0)
 
 
+def get_browser_session(target: str) -> list:
+    """Auto-grab session from logged-in browser on Kali."""
+    try:
+        from core.browser_session import capture_session
+        cookies = capture_session(target)
+        if cookies:
+            print(f"  [+] Browser session captured: {len(cookies)} cookies")
+            return [{"cookies": cookies, "role": "user"}]
+    except Exception as e:
+        print(f"  [!] Browser session capture failed: {e}")
+    return []
+
 def scan_target(target: str, h1_username: str,
                 output_dir: str, credentials: list = None) -> dict:
     """Run AmonStrike pipeline on one target with Eternal-specific config."""
@@ -371,6 +383,9 @@ def main():
 """)
 
     creds = json.loads(args.credentials)
+    if not creds:
+        print("[*] No credentials provided — trying to grab from browser...")
+        creds = get_browser_session(args.target)
     os.makedirs(args.output, exist_ok=True)
     all_findings = []
 

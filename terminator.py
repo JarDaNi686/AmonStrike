@@ -367,7 +367,18 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    creds   = json.loads(args.credentials)
+    creds = json.loads(args.credentials)
+    if not creds:
+        print("[*] No credentials — trying to grab from logged-in browser...")
+        try:
+            from core.browser_session import capture_session
+            domain = args.target.replace("https://","").replace("http://","").split("/")[0]
+            cookies = capture_session(domain)
+            if cookies:
+                creds = [{"cookies": cookies, "role": "user"}]
+                print(f"[+] Browser session grabbed: {len(cookies)} cookies")
+        except Exception as e:
+            print(f"[!] Browser grab failed: {e}")
     profiles = list(TERMINAL_PROFILES.keys()) if args.profiles == "all" \
                else args.profiles.split(",")
 
