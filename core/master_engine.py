@@ -411,7 +411,11 @@ class ProofEngine:
         return ""
 
 
-from core.brain import Brain
+try:
+    from core.brain import Brain
+except Exception:
+    Brain = None
+from core.local_brain import LocalBrain
 
 class MasterEngine:
     """
@@ -426,7 +430,7 @@ class MasterEngine:
         self.username = h1_username
         self.session  = self._build_session()
         self.rl       = AdaptiveRateLimiter()
-        self.brain    = Brain()
+        self.brain    = Brain() if Brain else LocalBrain()
 
     def _build_session(self) -> requests.Session:
         s = requests.Session()
