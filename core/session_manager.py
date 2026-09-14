@@ -179,12 +179,12 @@ class SessionManager:
         except Exception:
             pass
 
-        # Also check /tmp for additional profiles
+        # Also check /tmp for additional profiles (cookies.sqlite only)
         try:
             for d in Path("/tmp").iterdir():
                 if d.is_dir():
                     db = d / "cookies.sqlite"
-                    if db.exists():
+                    if db.exists() and db.stat().st_size > 0:
                         dbs.append(db)
         except Exception:
             pass
@@ -253,7 +253,7 @@ class SessionManager:
   3. Run scanner again — session auto-detected
 
   For second account (IDOR testing):
-     firefox --no-remote --profile /tmp/ff_account2 &
+     mkdir -p /tmp/ff_account2 && firefox --no-remote --profile /tmp/ff_account2 &
      Login with second account
      Run scanner again
 
