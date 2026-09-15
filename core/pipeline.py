@@ -76,10 +76,20 @@ class AmonStrikePipeline:
         except Exception:
             self.ptt = None
 
+        import signal
+        def _timeout_handler(signum, frame):
+            raise TimeoutError("Step timed out")
+
         for step in steps:
             try:
+                signal.signal(signal.SIGALRM, _timeout_handler)
+                signal.alarm(120)  # 2 min max per step
                 step()
+                signal.alarm(0)
+            except TimeoutError:
+                self.log(f"{step.__name__} timed out — skipping", "!")
             except Exception as e:
+                signal.alarm(0)
                 self.log(f"{step.__name__} error: {e}", "!")
                 if self.debug:
                     import traceback

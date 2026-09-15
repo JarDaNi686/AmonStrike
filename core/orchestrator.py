@@ -41,6 +41,25 @@ def check_tool(name: str) -> str:
     return path or ""
 
 
+def check_and_report_tools():
+    """Show which tools are available and how to install missing ones."""
+    available   = {k:v for k,v in TOOLS.items() if v}
+    unavailable = {k:v for k,v in TOOLS.items() if not v}
+    print(f"  Available ({len(available)}): {', '.join(available.keys())}")
+    if unavailable:
+        print(f"  Missing  ({len(unavailable)}): {', '.join(unavailable.keys())}")
+        print(f"  Install: sudo apt install -y {' '.join(k for k in unavailable if k in ['sqlmap','nikto','gobuster','nmap','burpsuite'])}")
+        go_tools = [k for k in unavailable if k in ['nuclei','subfinder','httpx','dalfox','katana']]
+        if go_tools:
+            for t in go_tools:
+                urls = {'nuclei':'projectdiscovery/nuclei/v3/cmd/nuclei',
+                       'subfinder':'projectdiscovery/subfinder/v2/cmd/subfinder',
+                       'httpx':'projectdiscovery/httpx/cmd/httpx',
+                       'dalfox':'hahwul/dalfox/v2',
+                       'katana':'projectdiscovery/katana/cmd/katana'}
+                if t in urls:
+                    print(f"  go install github.com/{urls[t]}@latest")
+
 TOOLS = {
     "sqlmap":    check_tool("sqlmap"),
     "nuclei":    check_tool("nuclei"),
