@@ -315,9 +315,32 @@ class AmonStrikePipeline:
     # ── STEP 05: Auth Engine ──────────────────────────────────
     def _step05_auth(self):
         self.log("Step 05: Auth Engine")
+        
+        # Always try browser session first
+        try:
+            from core.session_manager import SessionManager
+            sm      = SessionManager()
+            domain  = __import__("urllib.parse", fromlist=["urlparse"]).urlparse(self.target).netloc
+            cookies = sm._grab_from_browser(domain)
+            if cookies:
+                self.state["sessions"] = [{
+                    "username": "browser_session",
+                    "role":     "user",
+                    "cookies":  cookies,
+                    "headers":  {"X-HackerOne-Handle": "jardani101"},
+                    "user_id":  "",
+                }]
+                self.log(f"Session: {len(cookies)} cookies from browser", "+")
+                # If we have credentials too, add them
+                if not self.credentials:
+                    return
+        except Exception as e:
+            self.log(f"Browser session: {e}", "~")
+
         if not self.credentials:
-            self.state["sessions"] = []
-            self.log("No credentials — unauthenticated scan", "~")
+            if not self.state.get("sessions"):
+                self.state["sessions"] = []
+                self.log("No credentials — unauthenticated scan", "~")
             return
 
         try:
