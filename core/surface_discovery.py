@@ -27,6 +27,23 @@ urllib3.disable_warnings()
 
 # API endpoint wordlist — common patterns on real apps
 API_WORDLIST = [
+    # Claude.ai + Anthropic console specific
+    "/api/auth/session",
+    "/api/organizations",
+    "/api/account",
+    "/api/bootstrap",
+    "/api/usage",
+    "/api/billing",
+    "/api/limits",
+    "/api/models",
+    "/api/organizations/unknown/chat_conversations",
+    "/api/organizations/unknown/api_keys",
+    "/api/organizations/unknown/members",
+    "/api/organizations/unknown/settings",
+    "/api/organizations/unknown/usage",
+    "/api/organizations/unknown/workspaces",
+    "/api/organizations/unknown/invites",
+
     # Auth
     "/api/auth/login", "/api/auth/register", "/api/auth/token",
     "/api/auth/refresh", "/api/v1/auth/login", "/api/v2/auth/login",
