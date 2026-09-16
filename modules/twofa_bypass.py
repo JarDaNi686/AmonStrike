@@ -89,7 +89,8 @@ class TwofaBypassModule(BaseModule):
             for i in range(10):
                 r2 = self.post(path, json={"code": str(i).zfill(8)})
                 codes.append(r2.status_code if r2 else 0)
-            if all(c not in [429,423] for c in codes):
+            real_responses = [c for c in codes if c in [200,201,204]]
+            if len(real_responses) >= 5 and all(c not in [429,423] for c in real_responses):
                 self.add_finding(
                     title       = f"Backup Code Brute Force Possible: {path}",
                     severity    = "HIGH",

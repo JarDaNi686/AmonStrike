@@ -80,7 +80,9 @@ class RateLimitModule(BaseModule):
                 r2 = self.post(path, json={"otp": code, "code": code})
                 codes.append(r2.status_code if r2 else 0)
 
-            if codes and all(c not in [429,403,423] for c in codes):
+            # Only report if we got real 200 responses (not just timeouts/errors)
+            real_responses = [c for c in codes if c in [200,201,204]]
+            if len(real_responses) >= 5 and all(c not in [429,403,423] for c in real_responses):
                 self.add_finding(
                     title       = f"No Rate Limiting on OTP Endpoint: {path}",
                     severity    = "CRITICAL",
