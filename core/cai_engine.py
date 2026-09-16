@@ -294,7 +294,7 @@ class DynamicToolRouter:
         # Build precondition flags
         flags = set()
         if any("?" in e for e in endpoints):    flags.add("has_params")
-        if any("/\d+" in e for e in endpoints): flags.add("has_ids")
+        if any(any(c.isdigit() for c in e.split("/")[-1]) for e in endpoints): flags.add("has_ids")
         if any("url=" in e or "redirect=" in e
                for e in endpoints):             flags.add("has_url_params")
         if "php" in tech:                       flags.add("is_php")
