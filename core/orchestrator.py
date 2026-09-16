@@ -97,6 +97,7 @@ class BurpAutomation:
                           "https": f"http://127.0.0.1:{proxy_port}"}
         self.process    = None
         self.findings   = []
+        self.available  = False
 
     def start(self) -> bool:
         """Start Burp Suite headlessly."""
@@ -811,9 +812,12 @@ class MasterOrchestrator:
             pipeline = AmonStrikePipeline(
                 target         = self.target,
                 output_dir     = str(self.output_dir),
-                credentials    = [{"cookies": cookies}] if cookies else [],
+                credentials    = [{"cookies": cookies, "role": "user"}] if cookies else [],
                 program_handle = self.program,
             )
+            # Pre-load discovered endpoints
+            pipeline.state["endpoints"] = endpoints
+            pipeline.state["sessions"]  = [{"cookies": cookies, "headers": {"X-HackerOne-Handle": self.h1_handle}}] if cookies else []
             result   = pipeline.run()
             module_findings = result.get("findings", [])
             self.all_findings.extend(module_findings)
