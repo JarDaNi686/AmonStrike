@@ -541,7 +541,11 @@ class CAIOrchestrator:
         print(f"  Autonomy: Level 3-4")
         print(f"{'='*60}\n")
 
+        from core.ghost_protocol import GhostProtocol
+        self.ghost = GhostProtocol()
+        intel = self.ghost.mission_briefing(self.target, [self.target])
         self.bb.write("target", self.target)
+        self.bb.write("endpoints", intel.get("passive_recon",{}).get("historical_urls",[]))
 
         # Phase 1: Recon + surface discovery
         self._run_phase("Recon", self._phase_recon)
