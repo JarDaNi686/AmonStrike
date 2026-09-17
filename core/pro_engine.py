@@ -338,9 +338,17 @@ class AuthenticatedTester:
                 if s2:
                     r2 = s2.get(ep, timeout=10)
                     if r2.status_code == 200 and len(r2.text) > 10:
-                        # Check if s2 gets DIFFERENT data (different account)
                         s2_sensitive = self._extract_sensitive(r2.text)
-                        # Access to org endpoint by another account = IDOR
+
+                        # CRITICAL CHECK: are sessions from different accounts?
+                        # Extract user IDs from both responses
+                        uid1 = re.search(r'"uuid"\s*:\s*"([a-f0-9-]{30,})"', r1.text)
+                        uid2 = re.search(r'"uuid"\s*:\s*"([a-f0-9-]{30,})"', r2.text)
+                        if uid1 and uid2 and uid1.group(1) == uid2.group(1):
+                            # Same account - skip, not IDOR
+                            print(f"  [IDOR] Same account in both sessions — skipping")
+                            continue
+
                         if org_id and org_id in ep:
                             self._add_finding(
                                 title    = f"IDOR — Org Resource Accessible by Other Account: {urlparse(ep).path}",
