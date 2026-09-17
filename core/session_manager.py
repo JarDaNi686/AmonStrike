@@ -166,6 +166,29 @@ class SessionManager:
 
         return all_sessions
 
+    def _read_cookies_from_db(self, db_path: str, domain: str) -> dict:
+        """Read cookies for domain from a specific SQLite file."""
+        import sqlite3, shutil, os, tempfile
+        cookies = {}
+        tmp = tempfile.mktemp(suffix=".sqlite")
+        try:
+            shutil.copy2(db_path, tmp)
+            con = sqlite3.connect(tmp)
+            base = ".".join(domain.split(".")[-2:])
+            rows = con.execute(
+                "SELECT name, value FROM moz_cookies WHERE host LIKE ?",
+                (f"%{base}%",)
+            ).fetchall()
+            con.close()
+            for name, value in rows:
+                cookies[name] = value
+        except Exception:
+            pass
+        finally:
+            try: os.unlink(tmp)
+            except: pass
+        return cookies
+
     def _find_firefox_dbs(self) -> list:
         """Find all Firefox cookie databases on system."""
         dbs = []

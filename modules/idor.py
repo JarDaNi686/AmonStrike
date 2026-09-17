@@ -244,6 +244,17 @@ class IdorModule(BaseModule):
             r = self.get(path)
             if not r or r.status_code != 200:
                 continue
+            # Skip Cloudflare challenge pages and error pages
+            if any(s in r.text for s in [
+                "Just a moment", "Cloudflare", "cf-ray",
+                "Enable JavaScript", "challenge-platform",
+                "Ray ID", "__cf_chl"
+            ]):
+                continue
+            # Skip if response is HTML (not real API data)
+            ct = r.headers.get("content-type", "")
+            if "text/html" in ct and "json" not in ct:
+                continue
             try:
                 data = r.json()
                 if data and (isinstance(data, list) or

@@ -618,7 +618,8 @@ class CAIOrchestrator:
             cookies = sm.get(self.target)
             if cookies:
                 s.cookies.update(cookies)
-                self.bb.write("sessions", [cookies])
+                # Store as list-of-dicts for modules to consume
+            self.bb.state["sessions"] = [{"cookies": cookies, "headers": {}}]
                 print(f"  [+] Session loaded")
         except Exception:
             pass
@@ -653,7 +654,9 @@ class CAIOrchestrator:
         sys.path.insert(0, ".")
 
         sessions = self.bb.read("sessions") or []
-        cookies  = sessions[0] if sessions else {}
+        # sessions[0] may be a dict {cookies:..} or a flat cookie dict
+        first = sessions[0] if sessions else {}
+        cookies = first.get("cookies", first) if isinstance(first, dict) else {}
         endpoints= self.bb.read("endpoints") or []
 
         try:
