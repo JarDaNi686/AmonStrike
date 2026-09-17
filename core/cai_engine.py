@@ -661,7 +661,7 @@ class CAIOrchestrator:
             mod      = __import__(f"modules.{module_name}", fromlist=[cls_name])
             cls      = getattr(mod, cls_name)
             inst     = cls(url=self.target, timeout=10,
-                          cookies=cookies if isinstance(cookies, dict) else {},
+                          cookies=cookies if isinstance(cookies, dict) else (cookies[0] if isinstance(cookies, list) and cookies else {}),
                           headers={"X-HackerOne-Handle":"jardani101"})
             inst.extra_endpoints = endpoints[:50]
             result   = inst.run()

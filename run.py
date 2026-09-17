@@ -114,7 +114,8 @@ if ai and findings:
             {"body": f.get("evidence",""), "status_code": 200, "headers": {}},
             {"module": f.get("module",""), "payload": f.get("payload","")}
         )
-        if result.get("is_real", True):
+        # Only reject if AI is very confident it is a FP (confidence > 0.8)
+        if result.get("is_real", True) or result.get("confidence", 1.0) < 0.8:
             f["ai_confidence"] = result.get("confidence", 0.5)
             f["ai_layers"]     = result.get("layers_used", {})
             validated.append(f)

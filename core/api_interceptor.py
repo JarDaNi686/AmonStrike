@@ -221,6 +221,9 @@ class BrowserAPICapture:
         self.cookies2 = cookies2
 
     def run(self) -> list:
+        import os
+        # Ensure we check both root and user firefox profiles
+        os.environ.setdefault("HOME", "/root")
         import requests, urllib3
         urllib3.disable_warnings()
 
