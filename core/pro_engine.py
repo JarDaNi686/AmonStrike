@@ -609,6 +609,13 @@ class ProPentest:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def run(self) -> dict:
+        # Initialize 7-layer AI engine
+        try:
+            from core.ai_engine import AmonStrikeAI
+            self.ai = AmonStrikeAI()
+            print(f"  AI: {self.ai.status()['classical_ai']} | Neural: {self.ai.status()['neural_net']} | AGI: {self.ai.status()['agi']}")
+        except Exception as e:
+            self.ai = None
         print(f"\n{'='*60}")
         print(f"  PROFESSIONAL PENTEST ENGINE")
         print(f"  Target: {self.target}")
