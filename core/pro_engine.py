@@ -87,31 +87,50 @@ class AppMapper:
             return None
 
     def _get_session_context(self):
-        """Get org_id and user_id from authenticated session."""
-        try:
-            r = self.session.get(
-                self.target.rstrip('/') + "/api/auth/session",
-                timeout=10, verify=False
-            )
-            if r.status_code != 200:
-                return
-            data = r.json()
-            # Try multiple response structures
-            account = data.get("account", {})
-            memberships = account.get("memberships", [{}])
-            if memberships:
-                org = memberships[0].get("organization", {})
-                self.map["org_id"]  = org.get("uuid", "")
-                self.map["user_id"] = account.get("uuid", "")
-            # Alternative structure
-            if not self.map["org_id"]:
-                self.map["org_id"]  = data.get("organization_id", "")
-                self.map["user_id"] = data.get("user_id", "")
-            if self.map["org_id"]:
-                print(f"  [MAP] Org: {self.map['org_id'][:20]}...")
-                print(f"  [MAP] User: {self.map['user_id'][:15]}...")
-        except Exception as e:
-            print(f"  [MAP] Session context: {e}")
+        """Get org_id and user_id from authenticated session.
+        
+        Confirmed working endpoints (from debug_session.py output):
+          /api/bootstrap     -> 200, has account.uuid + memberships[0].organization.uuid
+          /api/organizations -> 200, has list of orgs
+          /api/account       -> 200, has uuid + memberships
+          /api/auth/session  -> 404 (does NOT exist)
+        """
+        for endpoint in ["/api/bootstrap", "/api/account", "/api/organizations"]:
+            try:
+                url = "https://claude.ai" + endpoint
+                r   = self.session.get(url, timeout=10, verify=False)
+                if r.status_code != 200:
+                    continue
+                data = r.json()
+
+                # /api/bootstrap and /api/account structure:
+                # { "uuid": "...", "memberships": [{"organization": {"uuid": "..."}}] }
+                if isinstance(data, dict):
+                    self.map["user_id"] = data.get("uuid", "")
+                    memberships = data.get("memberships", [])
+                    if memberships:
+                        org = memberships[0].get("organization", {})
+                        self.map["org_id"] = org.get("uuid", "")
+                    # Also check account nested
+                    account = data.get("account", {})
+                    if account:
+                        self.map["user_id"] = account.get("uuid", "")
+                        memberships = account.get("memberships", [])
+                        if memberships:
+                            org = memberships[0].get("organization", {})
+                            self.map["org_id"] = org.get("uuid", "")
+
+                # /api/organizations structure: [{"uuid": "..."}]
+                elif isinstance(data, list) and data:
+                    self.map["org_id"] = data[0].get("uuid", "")
+
+                if self.map["org_id"]:
+                    print(f"  [MAP] Org:  {self.map['org_id']}")
+                    print(f"  [MAP] User: {self.map['user_id']}")
+                    return  # got what we need
+
+            except Exception as e:
+                print(f"  [MAP] {endpoint} error: {e}")
 
     def _add_known_endpoints(self):
         """Add known API endpoints using org/user IDs."""
