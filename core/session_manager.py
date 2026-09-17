@@ -190,7 +190,10 @@ class SessionManager:
             pass
 
         for base in search_bases:
-            if not base.exists():
+            try:
+                if not base.exists():
+                    continue
+            except PermissionError:
                 continue
             for profile in base.iterdir():
                 if not profile.is_dir():
