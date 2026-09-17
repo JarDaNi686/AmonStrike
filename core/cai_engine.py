@@ -619,7 +619,7 @@ class CAIOrchestrator:
             if cookies:
                 s.cookies.update(cookies)
                 # Store as list-of-dicts for modules to consume
-            self.bb.state["sessions"] = [{"cookies": cookies, "headers": {}}]
+                self.bb.state["sessions"] = [{"cookies": cookies, "headers": {}}]
                 print(f"  [+] Session loaded")
         except Exception:
             pass
