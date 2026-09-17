@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-AmonStrike — CAI-Level Autonomous Pentesting
-Autonomy Level 3-4. Based on published research.
+AmonStrike — Professional Pentest Engine
+Real methodology. No noise. Evidence-based findings only.
 
-Usage: sudo python3 run.py <url> [program]
+Usage: sudo python3 run.py https://target.com [program_handle]
 """
 import sys, os
 from pathlib import Path
@@ -16,5 +16,5 @@ if len(sys.argv) < 2:
 url     = sys.argv[1]
 program = sys.argv[2] if len(sys.argv) > 2 else ""
 
-from core.cai_engine import CAIOrchestrator
-CAIOrchestrator(url, program).run()
+from core.pro_engine import ProPentest
+ProPentest(url, program).run()
