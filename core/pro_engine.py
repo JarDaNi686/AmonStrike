@@ -48,35 +48,24 @@ class AppMapper:
             "user_id":     "",
         }
 
-        # Step 1: Get real session context
+        # Step 1: Get session context + build endpoint list FIRST
         self._get_session_context()
+        self._add_known_endpoints()  # runs immediately after getting org_id
 
-        r = self._get(self.target)
-        if not r:
-            return self.map
-
-        # Detect tech
-        self._detect_tech(r)
-
-        # Find API base
-        self._find_api_base(r)
-
-        # Extract endpoints from JS
-        self._extract_from_js(r)
-
-        # Try API spec
-        self._try_api_spec()
-
-        # Add known endpoints based on org/user IDs
-        self._add_known_endpoints()
-
-        # Classify endpoints
-        self._classify_endpoints()
+        # Step 2: HTML parsing (optional - may fail on SPA/WAF, that is OK)
+        try:
+            r = self._get(self.target)
+            if r and r.status_code == 200 and len(r.text) > 500:
+                self._detect_tech(r)
+                self._find_api_base(r)
+                self._extract_from_js(r)
+                self._try_api_spec()
+                self._classify_endpoints()
+        except Exception:
+            pass  # HTML parsing failure does not stop testing
 
         print(f"  [MAP] Tech: {self.map['tech'][:3]}")
-        print(f"  [MAP] API: {self.map['api_base']}")
-        print(f"  [MAP] Endpoints: {len(self.map['endpoints'])}")
-        print(f"  [MAP] High-value: {len(self.map['data_endpoints'])}")
+        print(f"  [MAP] Endpoints to test: {len(self.map['data_endpoints'])}")
 
         return self.map
 
