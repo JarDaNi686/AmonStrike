@@ -357,10 +357,8 @@ class AuthenticatedTester:
                                 title    = f"IDOR — Org Resource Accessible by Other Account: {urlparse(ep).path}",
                                 severity = "CRITICAL" if sensitive else "HIGH",
                                 url      = ep,
-                                evidence = (f"Account 1 response ({len(r1.text)}b): {r1.text[:300]}
-
-"
-                                           f"Account 2 can also access ({len(r2.text)}b): {r2.text[:300]}"),
+                                evidence = (f"Account 1 ({len(r1.text)}b): {r1.text[:200]}"
+                                           f"\nAccount 2 ({len(r2.text)}b): {r2.text[:200]}"),
                                 poc      = f'curl -sk "{ep}" -H "Cookie: SECOND_ACCOUNT_SESSION"',
                                 impact   = "Account 2 can access Account 1's org data without authorization",
                             )
