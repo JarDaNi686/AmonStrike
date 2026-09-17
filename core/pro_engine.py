@@ -44,7 +44,12 @@ class AppMapper:
             "id_params":   [],
             "auth_endpoints": [],
             "data_endpoints": [],
+            "org_id":      "",
+            "user_id":     "",
         }
+
+        # Step 1: Get real session context
+        self._get_session_context()
 
         r = self._get(self.target)
         if not r:
@@ -62,6 +67,9 @@ class AppMapper:
         # Try API spec
         self._try_api_spec()
 
+        # Add known endpoints based on org/user IDs
+        self._add_known_endpoints()
+
         # Classify endpoints
         self._classify_endpoints()
 
@@ -77,6 +85,75 @@ class AppMapper:
             return self.session.get(url, timeout=10, verify=False)
         except Exception:
             return None
+
+    def _get_session_context(self):
+        """Get org_id and user_id from authenticated session."""
+        try:
+            r = self.session.get(
+                self.target.rstrip('/') + "/api/auth/session",
+                timeout=10, verify=False
+            )
+            if r.status_code != 200:
+                return
+            data = r.json()
+            # Try multiple response structures
+            account = data.get("account", {})
+            memberships = account.get("memberships", [{}])
+            if memberships:
+                org = memberships[0].get("organization", {})
+                self.map["org_id"]  = org.get("uuid", "")
+                self.map["user_id"] = account.get("uuid", "")
+            # Alternative structure
+            if not self.map["org_id"]:
+                self.map["org_id"]  = data.get("organization_id", "")
+                self.map["user_id"] = data.get("user_id", "")
+            if self.map["org_id"]:
+                print(f"  [MAP] Org: {self.map['org_id'][:20]}...")
+                print(f"  [MAP] User: {self.map['user_id'][:15]}...")
+        except Exception as e:
+            print(f"  [MAP] Session context: {e}")
+
+    def _add_known_endpoints(self):
+        """Add known API endpoints using org/user IDs."""
+        org  = self.map.get("org_id", "")
+        user = self.map.get("user_id", "")
+        base = "https://claude.ai"
+        c_base = "https://console.anthropic.com"
+
+        # Always add these
+        known = [
+            f"{base}/api/auth/session",
+            f"{base}/api/bootstrap",
+        ]
+
+        if org:
+            known += [
+                f"{base}/api/organizations/{org}/chat_conversations",
+                f"{base}/api/organizations/{org}/settings",
+                f"{base}/api/organizations/{org}/members",
+                f"{base}/api/organizations/{org}/entitlements",
+                f"{c_base}/api/organizations/{org}/api_keys",
+                f"{c_base}/api/organizations/{org}/usage",
+                f"{c_base}/api/organizations/{org}/members",
+                f"{c_base}/api/organizations/{org}/invites",
+                f"{c_base}/api/organizations/{org}/workspaces",
+            ]
+
+        if user:
+            known += [
+                f"{base}/api/accounts/{user}",
+                f"{base}/api/accounts/{user}/settings",
+                f"{base}/api/accounts/{user}/entitlements",
+            ]
+
+        # Add to endpoints
+        for ep in known:
+            if ep not in self.map["endpoints"]:
+                self.map["endpoints"].append(ep)
+
+        # Mark all as data endpoints
+        self.map["data_endpoints"].extend(known)
+        print(f"  [MAP] Known endpoints: {len(known)}")
 
     def _detect_tech(self, r: requests.Response):
         combined = r.text[:5000] + str(r.headers)
