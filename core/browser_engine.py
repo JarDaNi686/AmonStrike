@@ -50,7 +50,7 @@ class BrowserEngine:
                 "--ignore-certificate-errors",
             ],
             # Use real Chrome channel if available
-            channel = "chrome" if self._chrome_available() else None,
+            # channel removed — use Playwright Chromium, not system Chrome
         )
         self.context = self.browser.new_context(
             # Real browser fingerprint
@@ -80,7 +80,7 @@ class BrowserEngine:
         """Intercept every request the browser makes."""
         url = request.url
         # Capture API calls
-        if "/api/" in url or "/v1/" in url or "/graphql" in url:
+        if any(p in url for p in ["/api/","/v1/","/graphql","/organizations/","/bootstrap","/messages","/projects","/conversations","/workspaces","/members","/billing","/usage","/keys"]):
             self.captured.append({
                 "url":     url,
                 "method":  request.method,
@@ -94,10 +94,12 @@ class BrowserEngine:
         cookie_list = []
         for name, value in cookies.items():
             cookie_list.append({
-                "name":   name,
-                "value":  value,
-                "domain": f".{domain}",
-                "path":   "/",
+                "name":     name,
+                "value":    str(value),
+                "domain":   domain,
+                "path":     "/",
+                "secure":   True,
+                "sameSite": "None",
             })
         self.context.add_cookies(cookie_list)
         print(f"  [BROWSER] {len(cookie_list)} cookies loaded")
@@ -353,11 +355,6 @@ class BrowserEngine:
         state_eps = [
             ep for ep in self.captured
             if ep["method"] in ["POST","PUT","PATCH","DELETE"]
-            and any(k in ep["url"] for k in [
-                "redeem","transfer","pay","vote","like","order",
-                "verify","confirm","apply","submit","create",
-                "invite","revoke","reset","send",
-            ])
         ]
 
         print(f"\n  [IDEM] Testing {len(state_eps)} state-changing endpoints...")
