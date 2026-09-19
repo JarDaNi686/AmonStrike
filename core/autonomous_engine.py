@@ -55,21 +55,28 @@ class AutonomousEngine:
 
     def _pick_target(self, done: set) -> dict | None:
         try:
+            import os
             from core.h1_scope_fetcher import H1ScopeFetcher
-            fetcher  = H1ScopeFetcher()
+            fetcher  = H1ScopeFetcher(
+                h1_username=os.environ.get("H1_USERNAME",""),
+                h1_token=os.environ.get("H1_API_TOKEN",""),
+            )
             scope    = fetcher.fetch(self.program)
             in_scope = scope.get("in_scope", [])
             if not in_scope:
                 return None
             candidates = [
                 t for t in in_scope
-                if t.get("asset_type","") in ("URL","WILDCARD")
-                and t.get("asset_identifier","") not in done
+                if t.get("asset_type","") in ("url","wildcard","URL","WILDCARD")
+                and t.get("target", t.get("asset_identifier","")) not in done
             ]
             if not candidates:
                 done.clear()
                 self._save_done(done)
-                candidates = in_scope
+                candidates = [t for t in in_scope
+                              if t.get("asset_type","") in ("url","wildcard","URL","WILDCARD")]
+                if not candidates:
+                    candidates = in_scope
             candidates.sort(key=lambda t: t.get("max_severity","none"), reverse=True)
             return random.choice(candidates[:3]) if candidates else None
         except Exception as e:
@@ -77,7 +84,7 @@ class AutonomousEngine:
             return None
 
     def _run_target(self, target: dict) -> list:
-        url = target.get("asset_identifier","")
+        url = target.get("target", target.get("asset_identifier",""))
         if not url.startswith("http"):
             url = f"https://{url.lstrip('*.')}"
         self._log(f"Scanning {url}")
@@ -155,7 +162,7 @@ class AutonomousEngine:
                 time.sleep(1800)
                 continue
 
-            url = target.get("asset_identifier","")
+            url = target.get("target", target.get("asset_identifier",""))
 
             # Full scan
             findings = self._run_target(target)
