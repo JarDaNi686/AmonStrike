@@ -877,17 +877,24 @@ class MasterOrchestrator:
         return dedup
 
     def _validate_with_brain(self, findings: list) -> list:
-        """Use AI brain (Ollama/Groq/Gemini) to validate findings."""
+        """Use ReasoningEngine 3-agent verification for every finding."""
         try:
-            from core.ai_brain import get_brain
-            brain = get_brain()
+            from core.reasoning_engine import get_reasoning_engine
+            from core.scan_context import ScanContext
+            engine  = get_reasoning_engine()
+            # Build temporary scan context
+            ctx     = ScanContext(self.target, self.program)
+            ctx.findings = findings  # pre-load for context
+            scan_ctx_str = ctx.get_attack_context()
+
             valid = []
             for f in findings:
-                result = brain.validate_finding(f, f.get("evidence", ""))
-                if result.get("is_real", True):
-                    f["confidence"]      = result.get("confidence", 0.5)
-                    f["brain_notes"]     = result.get("reasoning", "")
-                    f["triage_verdict"]  = result.get("triage_verdict", "")
+                result = engine.verify_finding(f, f.get("evidence",""), scan_ctx_str)
+                if result.get("is_real", True) and result.get("confidence",0) > 0.4:
+                    f["confidence"]     = result.get("confidence", 0.5)
+                    f["brain_notes"]    = result.get("reasoning","")[:200]
+                    f["triage_verdict"] = result.get("verdict","")
+                    f["evidence_quality"] = result.get("evidence_quality","medium")
                     if result.get("suggested_severity"):
                         f["severity"] = result["suggested_severity"].upper()
                     valid.append(f)

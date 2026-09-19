@@ -41,28 +41,27 @@ GROQ_MODELS = [
 
 class AIBrain:
     """
-    Real AI reasoning for AmonStrike.
-    Thinks like a senior pentester. Learns. Never stops improving.
+    AmonStrike AI Brain — delegates to ReasoningEngine for all intelligence.
+    Backward-compatible wrapper. New code should use ReasoningEngine directly.
     """
 
-    SYSTEM_PROMPT = """You are an expert bug bounty hunter and penetration tester
-with 10 years of experience. You have deep knowledge of:
-- OWASP Top 10, API Security Top 10
-- IDOR, SSRF, XSS, SQLi, Auth bypass, Business Logic, Race Conditions
-- Zero-day chaining: combining multiple findings into critical vulnerabilities
-- HackerOne submission standards and triage criteria
-
-You analyze HTTP requests/responses and identify real security vulnerabilities.
-You are precise, technical, and only report confirmed issues.
-You think step by step. You never guess — you reason from evidence.
-Output ONLY valid JSON when asked for structured data."""
+    SYSTEM_PROMPT = """You are an elite bug bounty hunter AI.
+Analyze HTTP exchanges for security vulnerabilities.
+Think step by step. Only report confirmed issues. Return valid JSON."""
 
     def __init__(self, model: str = OLLAMA_MODEL, verbose: bool = False):
         self.model   = model
         self.verbose = verbose
-        self.provider = self._detect_provider()
-        self.history  = []   # conversation memory
-        print(f"[AIBrain] Provider: {self.provider} | Model: {self.model}")
+        self.history = []
+        # Delegate to the new reasoning engine
+        try:
+            from core.reasoning_engine import ReasoningEngine
+            self._engine  = ReasoningEngine(verbose=verbose)
+            self.provider = self._engine._providers[0] if self._engine._providers else "mock"
+        except Exception:
+            self._engine  = None
+            self.provider = self._detect_provider()
+        print(f"[AIBrain] Provider: {self.provider} | ReasoningEngine: {self._engine is not None}")
 
     def _detect_provider(self) -> str:
         """Auto-detect best available LLM provider."""
@@ -97,15 +96,13 @@ Output ONLY valid JSON when asked for structured data."""
 
     def think(self, prompt: str, context: str = "",
               ensemble: bool = False) -> str:
-        """
-        Core reasoning. ensemble=True queries ALL providers in parallel
-        and returns the most confident / longest response.
-        """
+        """Delegates to ReasoningEngine for all thinking."""
         full_prompt = f"{context}\n\n{prompt}" if context else prompt
-
-        if ensemble:
-            return self._ensemble_think(full_prompt)
-
+        if self._engine:
+            result = self._engine.reason(full_prompt, use_cot=True,
+                                          consensus=ensemble)
+            return result.get("answer", "")
+        # fallback
         dispatch = {
             "ollama": self._call_ollama,
             "groq":   self._call_groq,
@@ -161,7 +158,11 @@ Output ONLY valid JSON when asked for structured data."""
     # ── Core intelligence methods ─────────────────────────────
 
     def analyze_response(self, request: dict, response: dict,
-                         target_info: dict = None) -> dict:
+                         target_info: dict = None,
+                         scan_context: str = "") -> dict:
+        if self._engine:
+            return self._engine.deep_analyze(request, response, scan_context)
+        # Legacy path below
         """
         Analyze an HTTP request/response pair.
         Returns: {is_vulnerable, vuln_type, confidence, next_steps, evidence}
@@ -318,10 +319,12 @@ Return JSON:
 
         return self.think_json(prompt)
 
-    def validate_finding(self, finding: dict, evidence: str) -> dict:
-        """
-        Act as a skeptical H1 triager. Is this real or false positive?
-        """
+    def validate_finding(self, finding: dict, evidence: str,
+                         scan_context: str = "") -> dict:
+        """Act as a skeptical H1 triager. Delegates to 3-agent verifier."""
+        if self._engine:
+            return self._engine.verify_finding(finding, evidence, scan_context)
+        # Legacy path below
         prompt = f"""You are a HackerOne triager evaluating a reported vulnerability.
 Be skeptical. Many reports are false positives.
 

@@ -33,8 +33,23 @@ class AmonStrikePipeline:
         self.debug          = debug
         self.output_dir     = Path(output_dir or f"output/{urlparse(target).netloc}")
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.state          = {}   # shared state passed between steps
+        self.state          = {}
         self.log_lines      = []
+
+        # Central scan context (shared memory across all steps)
+        try:
+            from core.scan_context import ScanContext
+            self.scan_ctx = ScanContext(target, program_handle)
+            self.state["scan_context"] = self.scan_ctx
+        except Exception:
+            self.scan_ctx = None
+
+        # Decision hub (all AI decisions route through here)
+        try:
+            from core.decision_hub import DecisionHub
+            self.hub = DecisionHub(self.scan_ctx) if self.scan_ctx else None
+        except Exception:
+            self.hub = None
 
     def log(self, msg: str, level: str = "*"):
         line = f"[{level}] {msg}"
