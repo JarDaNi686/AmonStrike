@@ -106,11 +106,14 @@ def run_hunt(handle: str = None, url: str = None,
 
     program = target["handle"]
     if HAS_RICH:
+        submit_txt   = "[red]AUTO-SUBMIT ON[/red]" if target.get("auto_submit") else "[green]MANUAL REVIEW[/green]"
+        max_hours    = target.get("max_hours")
+        duration_txt = "Unlimited" if not max_hours else f"{max_hours}h"
         console.print(Panel(
             f"[bold red]TARGET LOCKED[/bold red]\n"
             f"[white]Program:[/white] [bold cyan]{program}[/bold cyan]\n"
-            f"[white]Submit:[/white]  {'[red]AUTO-SUBMIT ON[/red]' if target.get('auto_submit') else '[green]MANUAL REVIEW[/green]'}\n"
-            f"[white]Duration:[/white] {'Unlimited' if not target.get('max_hours') else f'{target[\"max_hours\"]}h'}",
+            f"[white]Submit:[/white]  {submit_txt}\n"
+            f"[white]Duration:[/white] {duration_txt}",
             border_style="red",
         ))
         console.print()
