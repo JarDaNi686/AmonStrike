@@ -35,6 +35,17 @@ def banner(target):
 
 
 def load_config(path):
+    """Load program config from YAML file or live H1 API (h1:<handle>)."""
+    if path.startswith("h1:"):
+        handle = path[3:]
+        import os
+        from core.h1_scope_fetcher import H1ScopeFetcher
+        fetcher = H1ScopeFetcher(
+            h1_username=os.environ.get("H1_USERNAME", ""),
+            h1_token=os.environ.get("H1_TOKEN", ""),
+        )
+        print(f"[Config] Fetching live H1 scope for: {handle}")
+        return fetcher.fetch(handle)
     import yaml
     with open(path) as f:
         return yaml.safe_load(f)
@@ -115,7 +126,7 @@ def run_idor_sweep(base_url, scope, token_a, token_b, out_dir, cfg=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config",     default=None, help="Program YAML (e.g. configs/gocardless_program.yaml)")
+    ap.add_argument("--config",     default=None, help="Program YAML or live H1 handle (e.g. configs/gocardless_program.yaml OR h1:gocardless)")
     ap.add_argument("--target",     default=None, help="Target URL (lab mode, e.g. http://localhost:3000)")
     ap.add_argument("--token-a",    default=os.environ.get("TOKEN_A"), help="Auth token account A")
     ap.add_argument("--token-b",    default=os.environ.get("TOKEN_B"), help="Auth token account B")
