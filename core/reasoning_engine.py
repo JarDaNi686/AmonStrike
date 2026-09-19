@@ -19,11 +19,16 @@ from pathlib import Path
 from datetime import datetime
 
 # Provider config (all from env vars)
-GROQ_KEY    = os.environ.get("GROQ_API_KEY",    "")
-GEMINI_KEY  = os.environ.get("GEMINI_API_KEY",  "")
-OPENAI_KEY  = os.environ.get("OPENAI_API_KEY",  "")
+GROQ_KEY      = os.environ.get("GROQ_API_KEY",      "")
+GEMINI_KEY    = os.environ.get("GEMINI_API_KEY",    "")
+OPENAI_KEY    = os.environ.get("OPENAI_API_KEY",    "")
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-OLLAMA_URL  = "http://localhost:11434"
+NVIDIA_KEY    = os.environ.get("NVIDIA_API_KEY",    "")   # build.nvidia.com free key
+OLLAMA_URL    = "http://localhost:11434"
+
+# NVIDIA NIM API — OpenAI-compatible, free tier at build.nvidia.com
+NVIDIA_NIM_URL  = "https://integrate.api.nvidia.com/v1"
+NVIDIA_MODEL    = "nvidia/llama-3.1-nemotron-70b-instruct"  # top-tier free model
 
 GROQ_MODELS = [
     "llama-3.3-70b-versatile",
@@ -89,9 +94,10 @@ class ReasoningEngine:
         except Exception:
             pass
         if GROQ_KEY:      providers.append("groq")
+        if NVIDIA_KEY:    providers.append("nvidia")  # Nemotron-70B via NIM
         if GEMINI_KEY:    providers.append("gemini")
         if OPENAI_KEY:    providers.append("openai")
-        if ANTHROPIC_KEY: providers.append("fable")  # claude-fable-5-1
+        if ANTHROPIC_KEY: providers.append("fable")   # claude-fable-5-1
         return providers or ["mock"]
 
     # ── Core reasoning methods ────────────────────────────────
@@ -447,12 +453,13 @@ Return JSON:
 
     def _call(self, provider: str, prompt: str) -> str:
         dispatch = {
-            "ollama": self._ollama,
-            "groq":   self._groq,
-            "gemini": self._gemini,
-            "openai": self._openai,
-            "fable":  self._fable,
-            "mock":   self._mock,
+            "ollama":  self._ollama,
+            "groq":    self._groq,
+            "nvidia":  self._nvidia,
+            "gemini":  self._gemini,
+            "openai":  self._openai,
+            "fable":   self._fable,
+            "mock":    self._mock,
         }
         fn = dispatch.get(provider, self._mock)
         try:
@@ -464,7 +471,8 @@ Return JSON:
 
     def _ollama(self, prompt: str) -> str:
         # Use best available security model
-        preferred = ["llama3:70b","mixtral:8x7b","mistral:7b-instruct","llama3","llama2"]
+        preferred = ["amonstrike-security","nemotron","nemotron-mini",
+                     "llama3:70b","mixtral:8x7b","mistral:7b-instruct","llama3","llama2"]
         model = "llama3"
         try:
             r = requests.get(f"{OLLAMA_URL}/api/tags", timeout=2)
@@ -588,6 +596,33 @@ Return JSON:
                 print(f"[Reasoning] Fable error: {e}")
         return ""
 
+    def _nvidia(self, prompt: str) -> str:
+        """NVIDIA NIM — Nemotron-70B via build.nvidia.com (OpenAI-compatible, free tier)."""
+        if not NVIDIA_KEY:
+            return ""
+        try:
+            r = requests.post(
+                f"{NVIDIA_NIM_URL}/chat/completions",
+                headers={"Authorization": f"Bearer {NVIDIA_KEY}",
+                         "Content-Type": "application/json"},
+                json={
+                    "model":       NVIDIA_MODEL,
+                    "messages": [
+                        {"role": "system", "content": SECURITY_SYSTEM},
+                        {"role": "user",   "content": prompt},
+                    ],
+                    "temperature": 0.05,
+                    "max_tokens":  4096,
+                },
+                timeout=45,
+            )
+            if r.status_code == 200:
+                return r.json()["choices"][0]["message"]["content"]
+        except Exception as e:
+            if self.verbose:
+                print(f"[Reasoning] NVIDIA NIM error: {e}")
+        return ""
+
     def _mock(self, prompt: str) -> str:
         return json.dumps({
             "is_vulnerable": False,
@@ -632,12 +667,14 @@ Return JSON:
 
     def status(self) -> dict:
         return {
-            "providers":  self._providers,
-            "fable_ready": "fable" in self._providers,
+            "providers":      self._providers,
+            "fable_ready":    "fable"  in self._providers,
+            "nvidia_ready":   "nvidia" in self._providers,
             "consensus_ready": len(self._providers) > 1,
-            "groq":       bool(GROQ_KEY),
-            "gemini":     bool(GEMINI_KEY),
-            "anthropic":  bool(ANTHROPIC_KEY),
+            "groq":           bool(GROQ_KEY),
+            "nvidia":         bool(NVIDIA_KEY),
+            "gemini":         bool(GEMINI_KEY),
+            "anthropic":      bool(ANTHROPIC_KEY),
         }
 
 

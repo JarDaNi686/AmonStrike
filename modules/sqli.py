@@ -170,8 +170,65 @@ class SqliModule(BaseModule):
 
         # OOB SQLi via DNS - uses interactsh
         self._test_oob_sqli()
+
+        # Phase 4: sqlmap with WAF bypass (if installed and no findings yet)
+        if not self.findings:
+            self._run_sqlmap()
+
         self.log(f"SQLi scan complete — {len(self.findings)} findings", "+")
         return self.result()
+
+    def _run_sqlmap(self):
+        """Run sqlmap with WAF bypass techniques for thorough coverage."""
+        import shutil, subprocess, json as _json, tempfile
+        if not shutil.which("sqlmap"):
+            return
+        # Pick best endpoint with params
+        endpoints = self._spider()
+        targets = [ep for ep in endpoints if ep.get("params")][:5]
+        if not targets:
+            targets = [{"url": self.url, "method": "GET", "params": {}}]
+
+        for ep in targets:
+            url = ep["url"]
+            try:
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    cmd = [
+                        "sqlmap", "-u", url,
+                        "--batch",               # no interactive prompts
+                        "--level=3",             # thorough
+                        "--risk=2",              # reasonable risk
+                        "--random-agent",        # rotate UA
+                        "--tamper=space2comment,between,randomcase",  # WAF bypass
+                        "--timeout=10",
+                        "--retries=2",
+                        "--output-dir", tmpdir,
+                        "--forms",               # test forms too
+                        "--json-output",
+                        "-q",
+                    ]
+                    # Add WAF-specific tamper if cloudflare detected
+                    waf = getattr(self, "waf_type", "")
+                    if "cloudflare" in waf.lower():
+                        cmd += ["--tamper=charencode,space2randomblank"]
+
+                    r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                    output = r.stdout + r.stderr
+                    if "is vulnerable" in output.lower() or "injectable" in output.lower():
+                        self.add_finding(
+                            title       = f"SQL Injection confirmed by sqlmap — {url}",
+                            severity    = "CRITICAL",
+                            description = "sqlmap confirmed SQL injection at this endpoint.",
+                            evidence    = output[:2000],
+                            remediation = "Use parameterized queries / prepared statements.",
+                            url         = url,
+                            cve         = "CWE-89",
+                        )
+                        break
+            except subprocess.TimeoutExpired:
+                pass
+            except Exception as e:
+                self.log(f"sqlmap: {e}", "~")
 
     def _spider(self) -> list:
         """Collect all endpoints worth testing."""

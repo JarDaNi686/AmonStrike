@@ -33,6 +33,7 @@ ENV_VARS = {
     "GROQ_API_KEY":   "your_groq_api_key",
     "H1_USERNAME":    "your_h1_username",
     "H1_API_TOKEN":   "your_h1_api_token",
+    "NVIDIA_API_KEY": "",   # Free at build.nvidia.com — adds Nemotron-70B to ensemble
     "SLACK_WEBHOOK":  "",
     "DISCORD_WEBHOOK":"",
     "TELEGRAM_BOT_TOKEN": "",
