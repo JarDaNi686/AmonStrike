@@ -392,7 +392,8 @@ class AmonStrikePipeline:
             result = orch.run()
             self.state["intelligence"]    = result
             self.state["bypass_headers"]  = result.get("bypass_headers", {})
-            self.state["waf_type"]        = result.get("waf", {}).get("name", "")
+            waf = result.get("waf", "")
+            self.state["waf_type"]        = waf if isinstance(waf, str) else waf.get("name", "")
             self.log(f"Intelligence: WAF={self.state['waf_type'] or 'none'}", "+")
         except Exception as e:
             self.state["intelligence"]   = {}

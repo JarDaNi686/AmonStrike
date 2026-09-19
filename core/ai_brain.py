@@ -14,6 +14,7 @@ Setup (Kali):
     ollama serve &
 """
 
+import re
 import json
 import time
 import requests

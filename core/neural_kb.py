@@ -394,8 +394,14 @@ class NeuralKB:
 
     def _load(self):
         if KB_PATH.exists():
-            data = json.loads(KB_PATH.read_text())
-            self.patterns = {p["id"]: p for p in data}
+            try:
+                data = json.loads(KB_PATH.read_text())
+                # File may be a list (correct) or a dict (empty init) or empty
+                if isinstance(data, list):
+                    self.patterns = {p["id"]: p for p in data if isinstance(p, dict) and "id" in p}
+                # else: leave self.patterns empty → will seed below
+            except Exception:
+                pass
         if not self.patterns:
             self._seed()
 

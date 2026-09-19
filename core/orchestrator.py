@@ -902,7 +902,12 @@ class MasterOrchestrator:
                     print(f"  [AI] Rejected FP: {f.get('title','')[:60]}")
             # Chain analysis on confirmed findings
             if valid:
-                chains = brain.chain_findings(valid, self.target)
+                try:
+                    from core.chain_engine import ChainEngine
+                    chains = ChainEngine().chain_findings(valid, self.target)
+                    chains = chains if isinstance(chains, list) else []
+                except Exception:
+                    chains = []
                 for chain in chains:
                     valid.append({
                         "title":       chain.get("name","Chain"),
