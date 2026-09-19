@@ -401,8 +401,80 @@ class ToolRunner:
             name, findings = result_queue.get()
             self.results.extend(findings)
 
+        # Run the extended Kali arsenal (dalfox, gau, arjun, ghauri, trufflehog, etc.)
+        self._run_extended_arsenal()
+
         print(f"\n  [TOOLS] Total: {len(self.results)} findings from external tools")
         return self.results
+
+    def _run_extended_arsenal(self):
+        """
+        Run the full Kali arsenal beyond the core 10 tools.
+        Uses KaliToolsMaximizer to detect + run every available tool per phase.
+        Quality-first: deep flags, no speed shortcuts.
+        """
+        try:
+            from core.kali_tools import KaliToolsMaximizer
+        except Exception:
+            return
+        km   = KaliToolsMaximizer()
+        avail = km.get_all_available()
+        cookie_args = ["--cookie", self.cookie_str] if getattr(self, "cookie_str","") else []
+
+        # Curated high-value commands (only run if tool is installed)
+        jobs = []
+        u, d, out = self.target, self.domain, self.output_dir
+
+        if "gau" in avail:
+            jobs.append(("gau", [avail["gau"], d], 120))
+        if "waybackurls" in avail:
+            jobs.append(("waybackurls", [avail["waybackurls"], d], 90))
+        if "gospider" in avail:
+            jobs.append(("gospider", [avail["gospider"], "-s", u, "-d", "2", "-q"], 120))
+        if "hakrawler" in avail:
+            jobs.append(("hakrawler", [avail["hakrawler"], "-url", u, "-depth", "2"], 90))
+        if "dnsx" in avail:
+            jobs.append(("dnsx", [avail["dnsx"], "-d", d, "-silent"], 90))
+        if "naabu" in avail:
+            jobs.append(("naabu", [avail["naabu"], "-host", d, "-silent", "-top-ports", "100"], 120))
+        if "arjun" in avail:
+            jobs.append(("arjun", [avail["arjun"], "-u", u, "-q"], 120))
+        if "ghauri" in avail and self.endpoints:
+            ep = self.endpoints[0] if isinstance(self.endpoints[0], str) else self.endpoints[0].get("url", u)
+            jobs.append(("ghauri", [avail["ghauri"], "-u", ep, "--batch"] + cookie_args, 120))
+        if "dalfox" in avail and self.endpoints:
+            ep = self.endpoints[0] if isinstance(self.endpoints[0], str) else self.endpoints[0].get("url", u)
+            jobs.append(("dalfox", [avail["dalfox"], "url", ep, "--silence"] + cookie_args, 120))
+        if "trufflehog" in avail:
+            jobs.append(("trufflehog", [avail["trufflehog"], "filesystem", str(out), "--json"], 60))
+        if "feroxbuster" in avail:
+            jobs.append(("feroxbuster", [avail["feroxbuster"], "-u", u, "-q", "-d", "2",
+                                         "--timeout", "10"] + cookie_args, 180))
+
+        if not jobs:
+            return
+        print(f"\n  [ARSENAL] Running {len(jobs)} extended tools: "
+              f"{', '.join(j[0] for j in jobs)}")
+
+        rq = queue.Queue()
+        def _run(name, cmd, to):
+            r = km.run_tool_quality(name, cmd, timeout=to)
+            rq.put((name, r.get("findings", [])))
+            print(f"  [{name.upper()}] {len(r.get('findings',[]))} findings")
+
+        threads = []
+        for name, cmd, to in jobs:
+            t = threading.Thread(target=_run, args=(name, cmd, to), daemon=True)
+            threads.append(t); t.start()
+        for t in threads:
+            t.join(timeout=200)
+        while not rq.empty():
+            name, findings = rq.get()
+            for f in findings:
+                f.setdefault("source", name)
+                f.setdefault("module", "recon" if name in
+                    ("gau","waybackurls","gospider","hakrawler","dnsx","naabu") else name)
+            self.results.extend(findings)
 
     def _run_subfinder(self) -> list:
         out_file = self.output_dir / "subfinder.txt"
