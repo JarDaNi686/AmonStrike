@@ -870,21 +870,41 @@ class MasterOrchestrator:
         return dedup
 
     def _validate_with_brain(self, findings: list) -> list:
-        """Use local brain to validate findings."""
+        """Use AI brain (Ollama/Groq/Gemini) to validate findings."""
         try:
-            from core.local_brain import LocalBrain
-            brain   = LocalBrain()
-            valid   = []
+            from core.ai_brain import get_brain
+            brain = get_brain()
+            valid = []
             for f in findings:
-                result = brain.validate_finding(f, f.get("evidence",""))
+                result = brain.validate_finding(f, f.get("evidence", ""))
                 if result.get("is_real", True):
-                    f["confidence"]  = result.get("confidence", 50)
-                    f["brain_notes"] = result.get("reasoning","")
+                    f["confidence"]      = result.get("confidence", 0.5)
+                    f["brain_notes"]     = result.get("reasoning", "")
+                    f["triage_verdict"]  = result.get("triage_verdict", "")
+                    if result.get("suggested_severity"):
+                        f["severity"] = result["suggested_severity"].upper()
                     valid.append(f)
                 else:
-                    print(f"  [BRAIN] Rejected: {f.get('title','')[:50]}")
+                    print(f"  [AI] Rejected FP: {f.get('title','')[:60]}")
+            # Chain analysis on confirmed findings
+            if valid:
+                chains = brain.chain_findings(valid, self.target)
+                for chain in chains:
+                    valid.append({
+                        "title":       chain.get("name","Chain"),
+                        "severity":    "CRITICAL",
+                        "module":      "ai_chain_engine",
+                        "vuln_class":  "zero_day_chain",
+                        "url":         self.target,
+                        "description": chain.get("chain_description",""),
+                        "evidence":    json.dumps(chain.get("steps",[])),
+                        "confidence":  chain.get("confidence", 0.7),
+                        "is_chain":    True,
+                        "timestamp":   datetime.now().isoformat(),
+                    })
             return valid
-        except Exception:
+        except Exception as e:
+            print(f"  [AI] Brain unavailable: {e}")
             return findings
 
     def _generate_report(self):
