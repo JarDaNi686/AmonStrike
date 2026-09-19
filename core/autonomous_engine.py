@@ -62,21 +62,37 @@ class AutonomousEngine:
                 h1_token=os.environ.get("H1_API_TOKEN",""),
             )
             scope    = fetcher.fetch(self.program)
-            in_scope = scope.get("in_scope", [])
-            if not in_scope:
+
+            # Build target list from structured in_scope or fall back to core_assets
+            raw_in_scope = scope.get("scope_raw", {}).get("in_scope", [])
+            if raw_in_scope:
+                candidates_pool = [
+                    {"target": t.get("target", t.get("asset_identifier","")),
+                     "asset_type": t.get("asset_type","url"),
+                     "max_severity": t.get("max_severity","high")}
+                    for t in raw_in_scope
+                    if t.get("asset_type","") in ("url","wildcard","URL","WILDCARD")
+                ]
+            else:
+                # Fallback: use core_assets list
+                candidates_pool = [
+                    {"target": a, "asset_type": "wildcard", "max_severity": "critical"}
+                    for a in scope.get("core_assets", [])
+                ] + [
+                    {"target": a, "asset_type": "url", "max_severity": "high"}
+                    for a in scope.get("non_core_assets", [])
+                ]
+
+            if not candidates_pool:
                 return None
-            candidates = [
-                t for t in in_scope
-                if t.get("asset_type","") in ("url","wildcard","URL","WILDCARD")
-                and t.get("target", t.get("asset_identifier","")) not in done
-            ]
+
+            candidates = [t for t in candidates_pool
+                          if t.get("target","") not in done]
             if not candidates:
                 done.clear()
                 self._save_done(done)
-                candidates = [t for t in in_scope
-                              if t.get("asset_type","") in ("url","wildcard","URL","WILDCARD")]
-                if not candidates:
-                    candidates = in_scope
+                candidates = candidates_pool
+
             candidates.sort(key=lambda t: t.get("max_severity","none"), reverse=True)
             return random.choice(candidates[:3]) if candidates else None
         except Exception as e:
