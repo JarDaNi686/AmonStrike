@@ -243,7 +243,7 @@ class AmonStrikePipeline:
             brain    = get_brain()
             raw      = brain.think(prompt, ensemble=False)
             import re as _re
-            m        = _re.search(r'\{.*\}', raw, re.DOTALL)
+            m        = _re.search(r'\{.*\}', raw, _re.DOTALL)
             if m:
                 analysis = json.loads(m.group())
                 self.state["llm_analysis"]    = analysis

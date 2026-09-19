@@ -55,7 +55,22 @@ class CorsModule(BaseModule):
         for ep in getattr(self, "extra_endpoints", [])[:15]:
             endpoints.add(ep)
 
-        return list(endpoints)[:25]
+        # Scope filter: only test hosts belonging to the target domain
+        return [e for e in list(endpoints) if self._in_scope(e)][:25]
+
+    def _in_scope(self, url: str) -> bool:
+        """Only allow the target host or its subdomains — never third parties."""
+        try:
+            from urllib.parse import urlparse
+            host = urlparse(url).netloc.split(":")[0].lower()
+            if not host:
+                return True  # relative/self
+            base = self.parsed.netloc.split(":")[0].lower()
+            # Reduce to registrable domain (last two labels)
+            base_root = ".".join(base.split(".")[-2:])
+            return host == base or host.endswith("." + base_root) or host == base_root
+        except Exception:
+            return False
 
     def _test_cors(self, url: str):
         for origin in EVIL_ORIGINS:

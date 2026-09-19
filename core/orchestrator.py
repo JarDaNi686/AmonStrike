@@ -1053,7 +1053,11 @@ class MasterOrchestrator:
                 pass
             return valid
         except Exception as e:
-            print(f"  [AI] Brain unavailable: {e}")
+            import traceback
+            msg = str(e) or type(e).__name__
+            print(f"  [AI] Brain validation skipped ({msg}) — keeping findings unvalidated")
+            if not str(e):
+                traceback.print_exc()
             # Still fire alerts even without brain
             try:
                 from core.alerts import alert_batch
