@@ -337,11 +337,29 @@ class KaliToolsMaximizer:
 
     def _install_tool(self, name: str, install_spec: str) -> bool:
         """Install a single tool."""
+        # Tools that are also in Kali's apt repo — used as fallback when go is absent
+        APT_FALLBACK = {"dalfox": "dalfox", "gitleaks": "gitleaks",
+                        "amass": "amass", "ffuf": "ffuf", "nuclei": "nuclei",
+                        "subfinder": "subfinder", "httpx": "httpx-toolkit"}
         try:
             if install_spec.startswith("go:"):
+                if not shutil.which("go"):
+                    # Go not installed — try apt fallback if available
+                    if name in APT_FALLBACK:
+                        r = subprocess.run(
+                            ["sudo","apt-get","install","-y",APT_FALLBACK[name]],
+                            capture_output=True, timeout=180)
+                        if r.returncode == 0:
+                            return True
+                    print(f"[INSTALL] {name}: 'go' not installed. "
+                          f"Run: sudo apt install -y golang-go")
+                    return False
                 pkg = install_spec[3:]
-                cmd = ["go", "install", f"github.com/{pkg}@latest"]
-                r   = subprocess.run(cmd, capture_output=True, timeout=120)
+                # Handle full-path go packages vs github shorthand
+                target = pkg if pkg.startswith(("github.com/","golang.org/")) else f"github.com/{pkg}"
+                cmd = ["go", "install", f"{target}@latest"]
+                env = dict(os.environ)
+                r   = subprocess.run(cmd, capture_output=True, timeout=180, env=env)
                 return r.returncode == 0
 
             elif install_spec.startswith("apt:"):
