@@ -382,6 +382,52 @@ class KaliToolsMaximizer:
         """Return all available tools."""
         return dict(self.available)
 
+    def recommend_for_target(self, tech_stack: list = None,
+                             vuln_classes: list = None,
+                             auto_install: bool = False) -> dict:
+        """
+        Brain-driven tool sourcing: given what the target runs and what
+        vuln classes are in play, recommend (and optionally install from
+        trusted package managers) the missing tools that would help.
+
+        Safe by design: only installs via apt/go/pip/npm from the known
+        registry — never downloads/executes arbitrary URLs at runtime.
+        """
+        tech_stack   = [t.lower() for t in (tech_stack or [])]
+        vuln_classes = [v.lower() for v in (vuln_classes or [])]
+
+        wanted = set()
+        for vc in vuln_classes:
+            for phase, tools in VULN_TOOL_MAP.items():
+                if phase in vc or vc in phase:
+                    wanted.update(tools)
+        # Tech-specific suggestions
+        tech_map = {
+            "wordpress": ["nuclei"], "graphql": ["nuclei"],
+            "jwt": ["jwt_tool"], "aws": ["s3scanner","awscli"],
+            "cloudflare": ["cloudflair"], "php": ["nuclei","commix"],
+        }
+        for tech in tech_stack:
+            for k, tools in tech_map.items():
+                if k in tech:
+                    wanted.update(tools)
+
+        missing = {t: TOOL_REGISTRY[t]["install"]
+                   for t in wanted
+                   if t in TOOL_REGISTRY and t not in self.available}
+
+        result = {"recommended": sorted(wanted),
+                  "missing": missing, "installed": []}
+
+        if auto_install and missing:
+            for name, spec in missing.items():
+                if spec and spec != "builtin" and self._install_tool(name, spec):
+                    path = shutil.which(name)
+                    if path:
+                        self.available[name] = path
+                        result["installed"].append(name)
+        return result
+
     def run_tool_quality(self, tool: str, cmd: list, timeout: int = 300,
                          output_file: str = None) -> dict:
         """

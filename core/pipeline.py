@@ -534,6 +534,21 @@ class AmonStrikePipeline:
             except Exception as e:
                 self.log(f"GitHub OSINT: {e}", "~")
 
+            # Brain-driven tool sourcing: install missing tools for this target
+            try:
+                from core.kali_tools import KaliToolsMaximizer
+                km   = KaliToolsMaximizer()
+                tech = self.state.get("tech_stack", []) or [self.state.get("waf_type","")]
+                vcls = ["sqli","xss","ssrf","idor","crawl","params","secrets","vuln_scan"]
+                rec  = km.recommend_for_target(tech, vcls, auto_install=True)
+                if rec.get("installed"):
+                    self.log(f"Tool sourcing: installed {rec['installed']}", "+")
+                elif rec.get("missing"):
+                    self.log(f"Tool gaps (run hunt.py --install-tools): "
+                             f"{list(rec['missing'].keys())[:6]}", "i")
+            except Exception as e:
+                self.log(f"Tool sourcing: {e}", "~")
+
         except Exception as e:
             self.log(f"Surface discovery: {e}", "~")
 
