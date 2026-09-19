@@ -867,6 +867,13 @@ class MasterOrchestrator:
         removed = len(findings) - len(dedup)
         if removed:
             print(f"  [+] Removed {removed} duplicates")
+        # FIX #3 — CVSS score every finding
+        try:
+            from core.cvss_scorer import score_findings
+            dedup = score_findings(dedup)
+            print(f"  [+] CVSS scored {len(dedup)} findings")
+        except Exception as e:
+            print(f"  [!] CVSS scorer: {e}")
         return dedup
 
     def _validate_with_brain(self, findings: list) -> list:
@@ -902,9 +909,21 @@ class MasterOrchestrator:
                         "is_chain":    True,
                         "timestamp":   datetime.now().isoformat(),
                     })
+            # FIX #8 — Real-time Slack/Discord/Telegram alerts on CRITICAL/HIGH
+            try:
+                from core.alerts import alert_batch
+                alert_batch(valid)
+            except Exception:
+                pass
             return valid
         except Exception as e:
             print(f"  [AI] Brain unavailable: {e}")
+            # Still fire alerts even without brain
+            try:
+                from core.alerts import alert_batch
+                alert_batch([f for f in findings if f.get("severity") in ("CRITICAL","HIGH")])
+            except Exception:
+                pass
             return findings
 
     def _generate_report(self):

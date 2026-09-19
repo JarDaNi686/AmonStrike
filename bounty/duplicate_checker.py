@@ -40,9 +40,10 @@ class DuplicateChecker:
                  h1_username: str = None, h1_token: str = None,
                  bc_token: str = None):
         self.db_path    = db_path or os.path.expanduser("~/.amonstrike/duplicates.db")
-        self.h1_user    = h1_username
-        self.h1_token   = h1_token
-        self.bc_token   = bc_token
+        # FIX #4 — Always pull credentials from env vars
+        self.h1_user    = h1_username or os.environ.get("H1_USERNAME", "")
+        self.h1_token   = h1_token    or os.environ.get("H1_API_TOKEN", "")
+        self.bc_token   = bc_token    or os.environ.get("BC_API_TOKEN", "")
         self._init_db()
 
     def _init_db(self):
@@ -192,6 +193,29 @@ class DuplicateChecker:
         weakness = weakness_map.get(module, title.split(" ")[0])
 
         try:
+            auth = (self.h1_user, self.h1_token) if self.h1_user and self.h1_token else None
+            # FIX #4 — Check program's submitted reports (live, authenticated)
+            if auth and program_handle:
+                r2 = requests.get(
+                    f"{self.H1_API}/reports",
+                    params={"filter[program][handle]": program_handle, "page[size]": 25},
+                    auth=auth, timeout=10,
+                    headers={"Accept": "application/json"},
+                )
+                if r2.status_code == 200:
+                    for report in r2.json().get("data", []):
+                        attrs = report.get("attributes", {})
+                        rep_title = attrs.get("title", "")
+                        title_sim = SequenceMatcher(None, title.lower(), rep_title.lower()).ratio()
+                        if title_sim > 0.75:
+                            return {
+                                "is_duplicate": True,
+                                "confidence":   title_sim,
+                                "source":       "h1_program_reports",
+                                "details":      f"Already in program: '{rep_title}' (id: {report.get('id','')})",
+                                "similar":      [],
+                            }
+
             # Query H1 hacktivity (public endpoint, no auth needed for public)
             r = requests.get(
                 f"{self.H1_API}/hacktivity",
@@ -200,7 +224,7 @@ class DuplicateChecker:
                     "filter[disclosed]": "true",
                     "page[size]": 25,
                 },
-                auth=(self.h1_user, self.h1_token) if self.h1_user else None,
+                auth=auth,
                 timeout=10,
                 headers={"Accept": "application/json"},
             )

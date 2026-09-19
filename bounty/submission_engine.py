@@ -50,9 +50,10 @@ class SubmissionEngine:
                  h1_username: str = None, h1_token: str = None,
                  bc_token: str = None):
         self.output_dir   = output_dir or os.path.expanduser("~/.amonstrike/submissions")
-        self.h1_user      = h1_username
-        self.h1_token     = h1_token
-        self.bc_token     = bc_token
+        # FIX #1 — Always pull from env vars
+        self.h1_user      = h1_username or os.environ.get("H1_USERNAME", "")
+        self.h1_token     = h1_token    or os.environ.get("H1_API_TOKEN", "")
+        self.bc_token     = bc_token    or os.environ.get("BC_API_TOKEN", "")
         self.formatter    = HackerOneFormat()
         self.dup_checker  = DuplicateChecker(
             h1_username=h1_username, h1_token=h1_token
@@ -77,6 +78,13 @@ class SubmissionEngine:
             "queued":         0,
         }
 
+        # FIX #3 — Auto-score CVSS if not already scored
+        try:
+            from core.cvss_scorer import score_findings
+            findings = score_findings(findings)
+        except Exception:
+            pass
+
         for finding in findings:
             sev = finding.get("severity","")
 
@@ -85,9 +93,9 @@ class SubmissionEngine:
                 summary["filtered_out"] += 1
                 continue
 
-            # Filter by CVSS score
-            cvss = finding.get("cvss_score", 0)
-            if cvss and cvss < self.MIN_CVSS_SCORE:
+            # Filter by CVSS score — only skip if score present AND below threshold
+            cvss = finding.get("cvss_score", None)
+            if cvss is not None and cvss < self.MIN_CVSS_SCORE:
                 summary["filtered_out"] += 1
                 continue
 

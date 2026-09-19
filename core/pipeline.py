@@ -207,11 +207,10 @@ class AmonStrikePipeline:
 
     # ── STEP 03: LLM Analyze ──────────────────────────────────
     def _step03_llm_analyze(self):
-        self.log("Step 03: LLM Asset Analysis")
+        self.log("Step 03: LLM Asset Analysis (Groq/Ollama)")
         targets = self.state.get("alive_targets", [self.target])
         memory  = self._load_memory()
 
-        # Build prompt for LLM
         prompt = (
             f"You are a bug bounty expert. Analyze these targets and prioritize them.\n"
             f"Targets: {json.dumps(targets[:20])}\n"
@@ -223,37 +222,35 @@ class AmonStrikePipeline:
             f"Return ONLY valid JSON."
         )
 
+        # FIX #1 — Use AIBrain (Groq+Ollama ensemble) not Anthropic
         try:
-            r = requests.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={"Content-Type": "application/json"},
-                json={
-                    "model": "claude-sonnet-4-6",
-                    "max_tokens": 1000,
-                    "messages": [{"role": "user", "content": prompt}]
-                },
-                timeout=30
-            )
-            if r.status_code == 200:
-                text = r.json()["content"][0]["text"]
-                # Extract JSON
-                import re
-                m = re.search(r'\{.*\}', text, re.DOTALL)
-                if m:
-                    analysis = json.loads(m.group())
-                    self.state["llm_analysis"] = analysis
-                    priority = analysis.get("priority_targets", targets[:3])
-                    self.state["priority_targets"] = priority
-                    self.log(f"LLM: prioritized {len(priority)} targets", "+")
-                    self.log(f"LLM reasoning: {analysis.get('reasoning','')[:80]}", "i")
-                    return
-        except Exception:
-            pass
+            from core.ai_brain import get_brain
+            brain    = get_brain()
+            raw      = brain.think(prompt, ensemble=False)
+            import re as _re
+            m        = _re.search(r'\{.*\}', raw, re.DOTALL)
+            if m:
+                analysis = json.loads(m.group())
+                self.state["llm_analysis"]    = analysis
+                priority = analysis.get("priority_targets", targets[:3])
+                self.state["priority_targets"] = priority
+                self.log(f"AI: prioritized {len(priority)} targets", "+")
+                self.log(f"AI reasoning: {analysis.get('reasoning','')[:80]}", "i")
+                # FIX #2 — MCTS refines attack order
+                try:
+                    from core.mcts_planner import MCTSPlanner
+                    plan = MCTSPlanner(time_limit=1.0).plan({"findings": []})
+                    self.state["mcts_plan"] = plan
+                    self.log(f"MCTS plan: {plan[:4]}", "i")
+                except Exception:
+                    pass
+                return
+        except Exception as e:
+            self.log(f"AIBrain unavailable: {e} — using fallback", "~")
 
-        # Fallback: use all alive targets
         self.state["priority_targets"] = targets[:5]
         self.state["llm_analysis"]     = {}
-        self.log("LLM unavailable — using all targets", "~")
+        self.log("AI unavailable — using all targets", "~")
 
     # ── STEP 04: Endpoint Crawler ──────────────────────────────
     def _step04_crawl(self):
@@ -390,7 +387,7 @@ class AmonStrikePipeline:
     # ── STEP 07: Attack Engine ────────────────────────────────
     def _step04b_surface_discovery(self):
         """Aggressive surface discovery - finds real API endpoints."""
-        self.log("Step 04b: Aggressive Surface Discovery")
+        self.log("Step 04b: Aggressive Surface Discovery + JS Analysis + WAF Detection")
         try:
             from core.surface_discovery import AggressiveSurfaceDiscovery
             import requests, urllib3; urllib3.disable_warnings()
@@ -399,7 +396,6 @@ class AmonStrikePipeline:
                 "User-Agent": "Mozilla/5.0",
                 "X-Hackerone": "jardani101",
             })
-            # Add any required headers from config
             for h, v in self.state.get("required_headers", {}).items():
                 s.headers[h] = v
 
@@ -407,14 +403,12 @@ class AmonStrikePipeline:
                          self.state.get("required_headers", {}))
             result = disc.run()
 
-            # Merge discovered endpoints
             existing = set(self.state.get("endpoints", []))
             new_eps  = set(result.get("endpoints", []))
             api_eps  = set(result.get("api_calls", []))
             all_eps  = existing | new_eps | api_eps
             self.state["endpoints"] = list(all_eps)
 
-            # Log interesting findings immediately
             for item in result.get("interesting", []):
                 if item.get("type") == "sensitive_data_in_response":
                     self.log(f"Sensitive data in: {item.get('url','')[:60]}", "!")
@@ -422,7 +416,6 @@ class AmonStrikePipeline:
                     self.log(f"Exposed file: {item.get('path','')} ({item.get('size',0)}b)", "!")
                 elif item.get("type") == "possible_secret":
                     self.log(f"Possible secret in JS: {item.get('value','')[:40]}", "!")
-                    # Auto-add as finding
                     self.state.setdefault("findings", []).append({
                         "title":       "Possible Secret/API Key Exposed in JS File",
                         "severity":    "HIGH",
@@ -435,6 +428,64 @@ class AmonStrikePipeline:
                     })
 
             self.log(f"Surface: {len(all_eps)} total endpoints discovered", "+")
+
+            # FIX #3 — WAF detection + bypass
+            try:
+                from core.waf_bypass import WAFBypass
+                waf = WAFBypass(s)
+                waf_type = waf.detect(self.target)
+                self.state["waf_type"]    = waf_type
+                self.state["waf_bypass"]  = waf
+                self.log(f"WAF detected: {waf_type or 'none'}", "+")
+            except Exception as e:
+                self.log(f"WAF detect: {e}", "~")
+
+            # FIX #3 — JS intelligence (hidden endpoints, secrets, GraphQL)
+            try:
+                from core.js_analyzer import JSAnalyzer
+                js = JSAnalyzer(self.target, s)
+                js_result = js.scan()
+                for ep in js_result.get("endpoints", []):
+                    self.state["endpoints"].append(ep)
+                for secret in js_result.get("secrets", []):
+                    self.state.setdefault("findings", []).append({
+                        "title":       f"Secret in JS: {secret['type']}",
+                        "severity":    "HIGH",
+                        "module":      "js_analyzer",
+                        "url":         self.target,
+                        "description": f"JS intelligence found {secret['type']}",
+                        "evidence":    secret["value"],
+                        "remediation": "Remove secrets from client-side code.",
+                    })
+                if js_result.get("graphql"):
+                    self.state["has_graphql"] = True
+                self.log(f"JS: {len(js_result['endpoints'])} endpoints, {len(js_result['secrets'])} secrets", "+")
+            except Exception as e:
+                self.log(f"JS analysis: {e}", "~")
+
+            # FIX #4 — GitHub OSINT
+            try:
+                from core.github_osint import GitHubOSINT
+                from urllib.parse import urlparse as _up
+                domain = _up(self.target).netloc
+                gh = GitHubOSINT()
+                gh_result = gh.full_scan(domain)
+                for f in gh_result.get("findings", []):
+                    self.state.setdefault("findings", []).append({
+                        "title":       f"GitHub: {f.get('secret_type', f.get('query',''))}",
+                        "severity":    f.get("severity","HIGH"),
+                        "module":      "github_osint",
+                        "url":         f.get("url", self.target),
+                        "description": f"Secret/credential found in GitHub repo: {f.get('repo','')}",
+                        "evidence":    f"File: {f.get('file','')} Value: {f.get('value','')}",
+                        "remediation": "Rotate all exposed credentials immediately.",
+                    })
+                orgs = gh_result.get("orgs", [])
+                if orgs:
+                    self.log(f"GitHub OSINT: orgs={orgs} findings={len(gh_result['findings'])}", "+")
+            except Exception as e:
+                self.log(f"GitHub OSINT: {e}", "~")
+
         except Exception as e:
             self.log(f"Surface discovery: {e}", "~")
 
@@ -570,6 +621,57 @@ class AmonStrikePipeline:
                 self.log("Nuclei not installed — install: go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest", "~")
         except Exception as e:
             self.log(f"Nuclei: {e}", "~")
+
+        # FIX #5 — Behavioral fuzzing on discovered endpoints with params
+        try:
+            from core.behavioral_fuzzer import BehavioralFuzzer
+            import requests as _req2, urllib3 as _ul2; _ul2.disable_warnings()
+            fuzz_session = _req2.Session(); fuzz_session.verify = False
+            fuzz_session.headers["User-Agent"] = "Mozilla/5.0"
+            fuzzer = BehavioralFuzzer()
+            fuzz_targets = [ep for ep in self.state.get("endpoints",[]) if "=" in ep][:10]
+            diff_engine_inst = None
+            try:
+                from core.diff_engine import DiffEngine
+                diff_engine_inst = DiffEngine(z_threshold=3.0)
+            except Exception:
+                pass
+            for ep in fuzz_targets:
+                for payload in fuzzer.boundary_payloads("string")[:5]:
+                    try:
+                        r = fuzz_session.get(ep + payload, timeout=8)
+                        if diff_engine_inst:
+                            # FIX #6 — Record baseline then detect anomalies
+                            diff_engine_inst.record(ep, r)
+                            anomaly = diff_engine_inst.is_anomaly(ep, r)
+                            if anomaly.get("zero_day_candidate"):
+                                findings.append({
+                                    "title":       f"Zero-Day Candidate: Anomalous response at {ep}",
+                                    "severity":    "HIGH",
+                                    "module":      "diff_engine",
+                                    "url":         ep,
+                                    "description": f"Z-score anomaly detected: {anomaly['anomalies']}",
+                                    "evidence":    str(anomaly),
+                                    "remediation": "Manual investigation required.",
+                                    "timestamp":   datetime.now().isoformat(),
+                                })
+                    except Exception:
+                        pass
+            self.log(f"Behavioral fuzzing complete on {len(fuzz_targets)} endpoints", "+")
+        except Exception as e:
+            self.log(f"Behavioral fuzzer: {e}", "~")
+
+        # FIX #7 — Neural KB reinforcement learning
+        try:
+            from core.neural_kb import NeuralKB
+            kb = NeuralKB()
+            for f in findings:
+                pattern_id = f.get("module","")
+                if pattern_id:
+                    kb.reinforce(pattern_id, success=True)
+            self.log(f"NeuralKB reinforced with {len(findings)} findings", "i")
+        except Exception as e:
+            self.log(f"NeuralKB: {e}", "~")
 
         self.state["findings"] = findings
         self.log(f"Attack: {len(findings)} real findings", "+")
