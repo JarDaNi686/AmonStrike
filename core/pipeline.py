@@ -453,6 +453,38 @@ class AmonStrikePipeline:
                 self.state["waf_type"]    = waf_type
                 self.state["waf_bypass"]  = waf
                 self.log(f"WAF detected: {waf_type or 'none'}", "+")
+
+                # If WAF present, hunt for origin IP to bypass it entirely
+                if waf_type:
+                    try:
+                        from core.waf_bypass import OriginFinder
+                        from urllib.parse import urlparse as _up
+                        dom = _up(self.target).netloc or self.target
+                        origin = OriginFinder(s).find(dom)
+                        if origin.get("verified_ip"):
+                            self.state["origin_ip"] = origin["verified_ip"]
+                            self.log(f"ORIGIN FOUND behind {waf_type}: "
+                                     f"{origin['verified_ip']} — WAF bypassed", "+")
+                            self.state.setdefault("findings", []).append({
+                                "title":    f"Origin IP Exposure — {waf_type} WAF bypass",
+                                "severity": "MEDIUM",
+                                "module":   "origin_finder",
+                                "type":     "waf_bypass",
+                                "url":      self.target,
+                                "description": (
+                                    f"The origin server IP {origin['verified_ip']} is "
+                                    f"reachable directly, bypassing the {waf_type} WAF. "
+                                    f"An attacker can attack the origin without WAF protection."
+                                ),
+                                "evidence": f"Verified via Host-header match: {origin['verified_ip']}",
+                                "remediation": "Restrict origin to only accept traffic from the WAF/CDN IP ranges.",
+                                "timestamp": datetime.now().isoformat(),
+                            })
+                        elif origin.get("origin_ips"):
+                            self.log(f"Candidate origins (unverified): "
+                                     f"{origin['origin_ips'][:5]}", "i")
+                    except Exception as e:
+                        self.log(f"Origin finder: {e}", "~")
             except Exception as e:
                 self.log(f"WAF detect: {e}", "~")
 

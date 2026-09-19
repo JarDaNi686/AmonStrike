@@ -27,6 +27,12 @@ class SessionManager:
         base = self._base_domain(domain)
         key  = f"{base}_{role}"
 
+        # 0. Headless credential injection (env var or session file)
+        injected = self._injected_cookies(base)
+        if injected:
+            self._save(key, base, injected, role)
+            return injected
+
         # Check saved sessions
         saved = self.sessions.get(key, {})
         if saved and self._is_alive(base, saved.get("cookies", {})):
@@ -40,6 +46,35 @@ class SessionManager:
 
         # Alert and guide user
         self._alert_missing(base, role)
+        return {}
+
+    def _injected_cookies(self, base: str) -> dict:
+        """
+        Load cookies for headless authenticated scanning, in priority order:
+          1. env AMONSTRIKE_COOKIES  — JSON dict for the current target
+          2. file data/sessions/<base>.json  — {"cookies": {...}} or {...}
+        This lets Kali scan authenticated without a browser.
+        """
+        import os, json as _json
+        from pathlib import Path
+
+        raw = os.environ.get("AMONSTRIKE_COOKIES", "").strip()
+        if raw:
+            try:
+                data = _json.loads(raw)
+                if isinstance(data, dict) and data:
+                    return data.get("cookies", data) if "cookies" in data else data
+            except Exception:
+                pass
+
+        sess_file = Path(f"data/sessions/{base}.json")
+        if sess_file.exists():
+            try:
+                data = _json.loads(sess_file.read_text())
+                if isinstance(data, dict):
+                    return data.get("cookies", data)
+            except Exception:
+                pass
         return {}
 
     def get_multi(self, domain: str, count: int = 2) -> list:

@@ -737,6 +737,30 @@ class MasterOrchestrator:
         self.output_dir= Path(f"output/{self.domain}")
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.all_findings = []
+        self.recon_data   = []
+
+    # Recon finding types/sources that are NOT vulnerabilities
+    RECON_TYPES   = {"subdomain","live_host","open_port","endpoint",
+                     "historical_url","parameter","tech","dns"}
+    RECON_SOURCES = {"subfinder","assetfinder","amass","httpx","httprobe",
+                     "gobuster","ffuf","feroxbuster","katana","gau","gauplus",
+                     "waybackurls","dnsx","naabu","whatweb"}
+
+    def _split_recon(self, findings: list) -> tuple:
+        """Separate recon/info-gathering data from actual vulnerabilities."""
+        recon, vulns = [], []
+        for f in findings:
+            module   = (f.get("module","")   or "").lower()
+            source   = (f.get("source","")   or "").lower()
+            ftype    = (f.get("type","")     or "").lower()
+            severity = (f.get("severity","") or "").upper()
+            is_recon = (
+                module == "recon"
+                or ftype in self.RECON_TYPES
+                or (source in self.RECON_SOURCES and severity in ("INFO",""))
+            )
+            (recon if is_recon else vulns).append(f)
+        return recon, vulns
 
     def run(self) -> dict:
         print(f"""
@@ -835,20 +859,48 @@ class MasterOrchestrator:
         # Phase 6: Deduplicate + validate with brain
         print("\n[Phase 6] Brain validation + deduplication...")
         self.all_findings = self._dedup(self.all_findings)
-        self.all_findings = self._validate_with_brain(self.all_findings)
+
+        # Split recon data from real vulnerabilities BEFORE brain validation
+        self.recon_data, vulns = self._split_recon(self.all_findings)
+        vulns = self._validate_with_brain(vulns)
+
+        # Phase 6b: Live verification — re-run each exploit to prove it's real
+        print("\n[Phase 6b] Live PoC verification...")
+        try:
+            from verify.live_verifier import LiveVerifier
+            verifier = LiveVerifier()
+            vulns    = verifier.verify_batch(vulns)
+            confirmed = sum(1 for f in vulns if f.get("verified") is True)
+            unconfirmed = sum(1 for f in vulns if f.get("verified") is False)
+            manual   = sum(1 for f in vulns if f.get("verified") is None)
+            print(f"  [+] Verified: {confirmed} confirmed | "
+                  f"{unconfirmed} not reproduced | {manual} need manual review")
+            # Drop findings that were actively disproven (verified == False)
+            vulns = [f for f in vulns if f.get("verified") is not False]
+        except Exception as e:
+            print(f"  [!] Live verifier: {e}")
+
+        self.all_findings = vulns  # only real vulns from here on
 
         # Phase 7: Generate report
         print("\n[Phase 7] Generating H1 report...")
         self._generate_report()
 
-        print(f"\n{'='*60}")
-        print(f"  COMPLETE — {len(self.all_findings)} total findings")
-        sev = {}
+        # Honest reporting: vulnerabilities vs recon data are counted separately
+        vuln_sev = {}
         for f in self.all_findings:
             s = f.get("severity","INFO")
-            sev[s] = sev.get(s,0) + 1
-        for s,c in sorted(sev.items()):
-            if c: print(f"  {s}: {c}")
+            vuln_sev[s] = vuln_sev.get(s,0) + 1
+        real_vulns = sum(c for s,c in vuln_sev.items() if s in ("CRITICAL","HIGH","MEDIUM","LOW"))
+
+        print(f"\n{'='*60}")
+        print(f"  COMPLETE")
+        print(f"  VULNERABILITIES: {real_vulns}")
+        for s in ("CRITICAL","HIGH","MEDIUM","LOW","INFO"):
+            c = vuln_sev.get(s,0)
+            if c: print(f"    {s}: {c}")
+        print(f"  RECON DATA: {len(self.recon_data)} "
+              f"(subdomains/endpoints/ports — not vulnerabilities)")
         print(f"\n  Reports: {self.output_dir}/")
         print(f"{'='*60}")
 

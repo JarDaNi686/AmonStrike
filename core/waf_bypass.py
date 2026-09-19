@@ -146,3 +146,99 @@ class WAFBypass:
     def _send(self, method, url, payload="", **kwargs):
         fn = self.session.get if method == "GET" else self.session.post
         return fn(url, timeout=15, verify=False, **kwargs)
+
+
+class OriginFinder:
+    """
+    Discovers the real origin IP behind Cloudflare/Akamai/etc.
+    If found, scanning the origin directly bypasses the WAF entirely.
+
+    Techniques:
+      1. Certificate transparency (crt.sh) — historical hostnames
+      2. DNS records of common non-proxied subdomains
+      3. Direct IP verification via Host-header match
+    """
+
+    CF_RANGES_HINT = ("104.16.", "104.17.", "172.64.", "172.65.",
+                      "104.18.", "104.19.", "104.20.", "104.21.",
+                      "104.22.", "104.23.", "104.24.", "104.25.",
+                      "104.26.", "104.27.", "104.28.", "141.101.",
+                      "108.162.", "190.93.", "188.114.", "197.234.",
+                      "198.41.", "162.158.", "162.159.", "173.245.")
+
+    COMMON_SUBS = ("direct", "origin", "ftp", "cpanel", "webmail", "mail",
+                   "dev", "staging", "test", "api", "admin", "backend",
+                   "server", "web", "old", "beta", "vpn")
+
+    def __init__(self, session: requests.Session = None):
+        self.session = session or requests.Session()
+        self.session.verify = False
+
+    def find(self, domain: str) -> dict:
+        """Return {origin_ips, verified_ip, method, cf_ips}."""
+        domain = domain.replace("https://","").replace("http://","").split("/")[0]
+        result = {"origin_ips": [], "verified_ip": "", "method": "", "cf_ips": []}
+
+        candidates = set()
+        candidates |= self._from_crtsh(domain)
+        candidates |= self._from_subdomains(domain)
+
+        real = []
+        for ip in candidates:
+            if any(ip.startswith(pfx) for pfx in self.CF_RANGES_HINT):
+                result["cf_ips"].append(ip)
+            else:
+                real.append(ip)
+        result["origin_ips"] = sorted(set(real))
+
+        for ip in result["origin_ips"][:15]:
+            if self._verify_origin(domain, ip):
+                result["verified_ip"] = ip
+                result["method"]      = "host_header_match"
+                break
+        return result
+
+    def _from_crtsh(self, domain: str) -> set:
+        hosts = set()
+        try:
+            r = self.session.get(f"https://crt.sh/?q=%25.{domain}&output=json", timeout=20)
+            if r.status_code == 200:
+                for row in r.json():
+                    for h in row.get("name_value","").splitlines():
+                        h = h.strip().lstrip("*.")
+                        if h.endswith(domain):
+                            ip = self._resolve(h)
+                            if ip:
+                                hosts.add(ip)
+        except Exception:
+            pass
+        return hosts
+
+    def _from_subdomains(self, domain: str) -> set:
+        ips = set()
+        for sub in self.COMMON_SUBS:
+            ip = self._resolve(f"{sub}.{domain}")
+            if ip:
+                ips.add(ip)
+        return ips
+
+    def _resolve(self, host: str) -> str:
+        import socket
+        try:
+            return socket.gethostbyname(host)
+        except Exception:
+            return ""
+
+    def _verify_origin(self, domain: str, ip: str) -> bool:
+        for scheme in ("https", "http"):
+            try:
+                r = self.session.get(
+                    f"{scheme}://{ip}",
+                    headers={"Host": domain, "User-Agent": random.choice(USER_AGENTS)},
+                    timeout=8, allow_redirects=False,
+                )
+                if r.status_code < 500 and "cf-ray" not in {k.lower() for k in r.headers}:
+                    return True
+            except Exception:
+                continue
+        return False
