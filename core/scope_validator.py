@@ -59,15 +59,21 @@ class ScopeValidator:
     DEFAULT_RATE_LIMIT = 10
     MAX_RATE_LIMIT     = 50
 
-    def __init__(self, program=None, scope_items=None, custom_scope=None):
+    def __init__(self, program=None, scope_items=None, custom_scope=None,
+                 forbidden_hosts=None):
         """
-        program:      Bug bounty program dict
-        scope_items:  List of scope dicts from database
-        custom_scope: Manual list of allowed targets (for local testing)
+        program:         Bug bounty program dict
+        scope_items:     List of scope dicts from database
+        custom_scope:    Manual list of allowed targets (for local testing)
+        forbidden_hosts: Per-program absolute block list (e.g. production
+                         hosts a program explicitly forbids). Checked with
+                         the same priority as HARDCODED_EXCLUSIONS — nothing
+                         can override it.
         """
-        self.program      = program or {}
-        self.scope_items  = scope_items or []
-        self.custom_scope = custom_scope or []
+        self.program         = program or {}
+        self.scope_items     = scope_items or []
+        self.custom_scope    = custom_scope or []
+        self.forbidden_hosts = forbidden_hosts or []
 
         # Rate limiting state
         self._request_times = {}
@@ -98,6 +104,13 @@ class ScopeValidator:
             if fnmatch(host, excluded) or fnmatch(host, excluded.lstrip("*.")):
                 self.stats["blocked"] += 1
                 return False, f"Hardcoded exclusion: {excluded}"
+
+        # 1b. Per-program forbidden hosts (e.g. production the program
+        #     explicitly forbids). Absolute — overrides all scope below.
+        for forbidden in self.forbidden_hosts:
+            if fnmatch(host, forbidden) or host == forbidden:
+                self.stats["blocked"] += 1
+                return False, f"FORBIDDEN (program excludes production): {forbidden}"
 
         # 2. Custom scope (local testing / lab)
         if self.custom_scope:
