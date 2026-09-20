@@ -232,11 +232,17 @@ FINDING TO EVALUATE:
 Build the case: what evidence confirms this is real? What is the actual security impact?
 Return JSON: {{"is_real": true/false, "confidence": 0.0-1.0, "impact": "specific impact", "evidence_quality": "strong/medium/weak"}}"""
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
-            f_skeptic  = ex.submit(self._call_best, skeptic_prompt)
-            f_advocate = ex.submit(self._call_best, advocate_prompt)
-            skeptic_raw  = f_skeptic.result(timeout=30)
-            advocate_raw = f_advocate.result(timeout=30)
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+                f_skeptic  = ex.submit(self._call_best, skeptic_prompt)
+                f_advocate = ex.submit(self._call_best, advocate_prompt)
+                skeptic_raw  = f_skeptic.result(timeout=15)
+                advocate_raw = f_advocate.result(timeout=15)
+        except concurrent.futures.TimeoutError:
+            # AI too slow — don't hang the scan; treat as inconclusive
+            return {"is_real": True, "confidence": 0.5,
+                    "verdict": "needs_more_evidence",
+                    "reasoning": "AI validation timed out — relying on live verification"}
 
         skeptic  = self._extract_json(skeptic_raw)
         advocate = self._extract_json(advocate_raw)

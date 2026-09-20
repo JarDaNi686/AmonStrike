@@ -836,6 +836,30 @@ class MasterOrchestrator:
             (recon if is_recon else vulns).append(f)
         return recon, vulns
 
+    def _gate_severity(self, findings: list) -> list:
+        """
+        Proof-gated severity. A finding may only claim CRITICAL/HIGH if the live
+        verifier actually reproduced it (verified is True). Anything not proven
+        is capped at MEDIUM and labeled UNCONFIRMED, so we never present an
+        unverified claim as critical — the #1 cause of false-positive spam.
+        """
+        SEV_RANK = {"CRITICAL":4,"HIGH":3,"MEDIUM":2,"LOW":1,"INFO":0}
+        for f in findings:
+            verified = f.get("verified")
+            sev = (f.get("severity","") or "INFO").upper()
+            if verified is True:
+                f["confidence_label"] = "VERIFIED"
+                continue
+            # Not proven — cap at MEDIUM and mark clearly
+            if SEV_RANK.get(sev, 0) >= 3:  # CRITICAL/HIGH
+                f["original_severity"] = sev
+                f["severity"] = "MEDIUM"
+                f["confidence_label"] = "UNCONFIRMED"
+                f["title"] = f"[UNCONFIRMED] {f.get('title','')}"
+            else:
+                f["confidence_label"] = "UNCONFIRMED"
+        return findings
+
     def run(self) -> dict:
         print(f"""
 {'='*60}
@@ -934,12 +958,10 @@ class MasterOrchestrator:
         print("\n[Phase 6] Brain validation + deduplication...")
         self.all_findings = self._dedup(self.all_findings)
 
-        # Split recon data from real vulnerabilities BEFORE brain validation
         self.recon_data, vulns = self._split_recon(self.all_findings)
-        vulns = self._validate_with_brain(vulns)
 
-        # Phase 6b: Live verification — re-run each exploit to prove it's real
-        print("\n[Phase 6b] Live PoC verification...")
+        # Phase 6a: Live verification FIRST — fast, deterministic, re-runs exploits
+        print("\n[Phase 6a] Live PoC verification...")
         try:
             from verify.live_verifier import LiveVerifier
             verifier = LiveVerifier()
@@ -949,10 +971,21 @@ class MasterOrchestrator:
             manual   = sum(1 for f in vulns if f.get("verified") is None)
             print(f"  [+] Verified: {confirmed} confirmed | "
                   f"{unconfirmed} not reproduced | {manual} need manual review")
-            # Drop findings that were actively disproven (verified == False)
             vulns = [f for f in vulns if f.get("verified") is not False]
+            vulns = self._gate_severity(vulns)
         except Exception as e:
             print(f"  [!] Live verifier: {e}")
+
+        # Phase 6b: Brain validation ONLY on verified findings (few → fast, no timeout storm)
+        to_validate = [f for f in vulns if f.get("verified") is True][:10]
+        if to_validate:
+            print(f"\n[Phase 6b] Brain validation on {len(to_validate)} verified findings...")
+            validated = self._validate_with_brain(to_validate)
+            # Merge validated back, keep unverified findings as-is
+            validated_ids = {id(f) for f in to_validate}
+            vulns = validated + [f for f in vulns if id(f) not in validated_ids]
+        else:
+            print("\n[Phase 6b] Brain validation skipped (no verified findings to deep-check)")
 
         self.all_findings = vulns  # only real vulns from here on
 
