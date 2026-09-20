@@ -165,6 +165,23 @@ class AutonomousEngine:
     def run(self):
         self._log(f"=== Autonomous Engine Started ===")
         self._log(f"Program={self.program} auto_submit={self.auto_submit}")
+
+        # Direct target assignment: scan exactly the URL the user gave, once.
+        custom_url = getattr(self, "_custom_target_url", "")
+        if custom_url:
+            self._log(f"Direct target assigned: {custom_url}")
+            target   = {"target": custom_url, "asset_type": "url"}
+            findings = self._run_target(target)
+            self.total_findings += len(findings)
+            submitted = self._submit(findings, custom_url)
+            self.total_submitted += submitted
+            self._log(
+                f"[+] url={custom_url} | findings={len(findings)} "
+                f"| submitted={submitted}"
+            )
+            self._log(f"=== Single-target scan complete ===")
+            return
+
         done = self._load_done()
 
         while self._time_ok():
@@ -215,18 +232,25 @@ class AutonomousEngine:
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description="AmonStrike Autonomous Engine")
-    p.add_argument("--program",     required=True, help="HackerOne program handle")
+    p.add_argument("--program",     help="HackerOne program handle (auto-picks targets from scope)")
+    p.add_argument("--url",         help="Scan this exact URL directly (skips H1 auto-pick)")
     p.add_argument("--hours",       type=float, default=0,
                    help="Max runtime hours (0=unlimited)")
     p.add_argument("--no-submit",   action="store_true",
                    help="Find bugs but don't auto-submit — save reports locally only")
     args = p.parse_args()
 
+    if not args.program and not args.url:
+        p.error("provide --program <handle> or --url <target>")
+
     engine = AutonomousEngine(
-        program=args.program,
+        program=args.program or (args.url or ""),
         max_hours=args.hours,
         auto_submit=not args.no_submit,
     )
+    if args.url:
+        url = args.url if args.url.startswith("http") else f"https://{args.url}"
+        engine._custom_target_url = url
     try:
         engine.run()
     except KeyboardInterrupt:
