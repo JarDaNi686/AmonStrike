@@ -13,6 +13,8 @@ from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import core._compat  # noqa: F401
+
 LOOP_LOG  = Path("data/autonomous_log.jsonl")
 DONE_FILE = Path("data/completed_targets.json")
 SUBMIT_LOG = Path("data/submitted_reports.jsonl")

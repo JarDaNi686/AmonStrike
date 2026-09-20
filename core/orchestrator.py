@@ -21,6 +21,10 @@ All results merged. Brain decides what's real.
 
 import os, sys, json, time, shutil, subprocess
 import threading, queue, tempfile, hashlib
+try:
+    from core import _compat  # noqa: F401
+except Exception:
+    pass
 import requests, urllib3
 from pathlib import Path
 from datetime import datetime
