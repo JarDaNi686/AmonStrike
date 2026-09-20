@@ -836,6 +836,20 @@ class MasterOrchestrator:
             (recon if is_recon else vulns).append(f)
         return recon, vulns
 
+    def _save_leads(self, leads: list):
+        """Save unproven findings as leads for manual review — never in the report."""
+        try:
+            path = self.output_dir / "leads.json"
+            path.write_text(json.dumps([
+                {"title": l.get("title",""), "severity_claimed": l.get("severity",""),
+                 "module": l.get("module",""), "url": l.get("url",""),
+                 "why_unproven": l.get("verify_evidence","not auto-verifiable"),
+                 "verify_method": l.get("verify_method","")}
+                for l in leads
+            ], indent=2))
+        except Exception:
+            pass
+
     def _gate_severity(self, findings: list) -> list:
         """
         Proof-gated severity. A finding may only claim CRITICAL/HIGH if the live
@@ -970,24 +984,27 @@ class MasterOrchestrator:
             unconfirmed = sum(1 for f in vulns if f.get("verified") is False)
             manual   = sum(1 for f in vulns if f.get("verified") is None)
             print(f"  [+] Verified: {confirmed} confirmed | "
-                  f"{unconfirmed} not reproduced | {manual} need manual review")
-            vulns = [f for f in vulns if f.get("verified") is not False]
-            vulns = self._gate_severity(vulns)
+                  f"{unconfirmed} not reproduced | {manual} could not be proven")
+
+            # STRICT: only findings the verifier actually REPRODUCED are reported.
+            # Everything unproven is a lead, not a finding — saved separately, never
+            # in the report. This guarantees zero unverified claims in the output.
+            reported = [f for f in vulns if f.get("verified") is True]
+            self.leads = [f for f in vulns if f.get("verified") is not True]
+            self._save_leads(self.leads)
+            print(f"  [+] {len(reported)} proven findings reported | "
+                  f"{len(self.leads)} unproven leads saved to leads.json (NOT reported)")
+            vulns = reported
         except Exception as e:
             print(f"  [!] Live verifier: {e}")
+            vulns = []  # if we can't verify, we report nothing — no unproven claims
 
-        # Phase 6b: Brain validation ONLY on verified findings (few → fast, no timeout storm)
-        to_validate = [f for f in vulns if f.get("verified") is True][:10]
-        if to_validate:
-            print(f"\n[Phase 6b] Brain validation on {len(to_validate)} verified findings...")
-            validated = self._validate_with_brain(to_validate)
-            # Merge validated back, keep unverified findings as-is
-            validated_ids = {id(f) for f in to_validate}
-            vulns = validated + [f for f in vulns if id(f) not in validated_ids]
-        else:
-            print("\n[Phase 6b] Brain validation skipped (no verified findings to deep-check)")
+        # Phase 6b: Brain validation on the proven findings (few → fast, no timeout storm)
+        if vulns:
+            print(f"\n[Phase 6b] Brain validation on {len(vulns)} proven findings...")
+            vulns = self._validate_with_brain(vulns[:10]) + vulns[10:]
 
-        self.all_findings = vulns  # only real vulns from here on
+        self.all_findings = vulns  # only PROVEN vulns from here on
 
         # Phase 7: Generate report
         print("\n[Phase 7] Generating H1 report...")
