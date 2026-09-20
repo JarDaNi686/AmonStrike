@@ -237,21 +237,19 @@ class AmonStrikePipeline:
             f"Return ONLY valid JSON."
         )
 
-        # FIX #1 — Use AIBrain (Groq+Ollama ensemble) not Anthropic
+        # FIX #1 — Use AIBrain (Groq+Ollama+NVIDIA ensemble) not Anthropic
         try:
             from core.ai_brain import get_brain
             brain    = get_brain()
             raw      = brain.think(prompt, ensemble=False)
-            import re as _re
-            m        = _re.search(r'\{.*\}', raw, _re.DOTALL)
-            if m:
-                analysis = json.loads(m.group())
+            analysis = self._parse_ai_json(raw)
+            if analysis:
                 self.state["llm_analysis"]    = analysis
-                priority = analysis.get("priority_targets", targets[:3])
+                priority = analysis.get("priority_targets") or targets[:3]
                 self.state["priority_targets"] = priority
                 self.log(f"AI: prioritized {len(priority)} targets", "+")
-                self.log(f"AI reasoning: {analysis.get('reasoning','')[:80]}", "i")
-                # FIX #2 — MCTS refines attack order
+                if analysis.get("reasoning"):
+                    self.log(f"AI reasoning: {analysis.get('reasoning','')[:80]}", "i")
                 try:
                     from core.mcts_planner import MCTSPlanner
                     plan = MCTSPlanner(time_limit=1.0).plan({"findings": []})
@@ -260,12 +258,53 @@ class AmonStrikePipeline:
                 except Exception:
                     pass
                 return
+            else:
+                # AI responded but no parseable JSON — still use its raw text as a hint
+                snippet = (raw or "").strip().replace("\n", " ")[:100]
+                self.log(f"AI returned non-JSON (using all targets): {snippet}", "~")
         except Exception as e:
-            self.log(f"AIBrain unavailable: {e} — using fallback", "~")
+            self.log(f"AIBrain error: {e} — using fallback", "~")
 
         self.state["priority_targets"] = targets[:5]
         self.state["llm_analysis"]     = {}
-        self.log("AI unavailable — using all targets", "~")
+        self.log("AI fallback — using all targets", "~")
+
+    def _parse_ai_json(self, raw: str) -> dict:
+        """Robustly extract a JSON object from an LLM response.
+        Handles markdown fences, prose+JSON, and trailing text."""
+        if not raw:
+            return {}
+        import re as _re
+        text = raw.strip()
+        # Strip ```json ... ``` fences
+        fence = _re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, _re.DOTALL)
+        if fence:
+            try:
+                return json.loads(fence.group(1))
+            except Exception:
+                pass
+        # Greedy outermost object
+        for pat in (r"\{.*\}",):
+            m = _re.search(pat, text, _re.DOTALL)
+            if m:
+                blob = m.group()
+                try:
+                    return json.loads(blob)
+                except Exception:
+                    # Try trimming to balanced braces
+                    depth = 0; end = None
+                    for i, ch in enumerate(blob):
+                        if ch == "{": depth += 1
+                        elif ch == "}":
+                            depth -= 1
+                            if depth == 0:
+                                end = i + 1; break
+                    if end:
+                        try:
+                            return json.loads(blob[:end])
+                        except Exception:
+                            pass
+        return {}
 
     # ── STEP 04: Endpoint Crawler ──────────────────────────────
     def _step04_crawl(self):
@@ -275,8 +314,9 @@ class AmonStrikePipeline:
         from urllib.parse import urljoin
 
         targets   = self.state.get("priority_targets", [self.target])
-        endpoints = set()
-        forms     = []
+        # Preserve endpoints already discovered by the orchestrator / earlier steps
+        endpoints = set(self.state.get("endpoints", []))
+        forms     = list(self.state.get("forms", []))
         s         = requests.Session()
         s.verify  = False
         s.headers["User-Agent"] = "Mozilla/5.0"
@@ -320,7 +360,7 @@ class AmonStrikePipeline:
                 except Exception:
                     pass
 
-        self.state["endpoints"] = list(endpoints)[:200]
+        self.state["endpoints"] = list(endpoints)[:500]
         self.state["forms"]     = forms[:50]
         self.log(f"Crawl: {len(endpoints)} endpoints, {len(forms)} forms", "+")
 

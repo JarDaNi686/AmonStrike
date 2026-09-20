@@ -446,9 +446,7 @@ class ToolRunner:
         if "ghauri" in avail and self.endpoints:
             ep = self.endpoints[0] if isinstance(self.endpoints[0], str) else self.endpoints[0].get("url", u)
             jobs.append(("ghauri", [avail["ghauri"], "-u", ep, "--batch"] + cookie_args, 120))
-        if "dalfox" in avail and self.endpoints:
-            ep = self.endpoints[0] if isinstance(self.endpoints[0], str) else self.endpoints[0].get("url", u)
-            jobs.append(("dalfox", [avail["dalfox"], "url", ep, "--silence"] + cookie_args, 120))
+        # dalfox intentionally omitted here — it already runs as a core tool in run_all()
         if "trufflehog" in avail:
             jobs.append(("trufflehog", [avail["trufflehog"], "filesystem", str(out), "--json"], 60))
         if "feroxbuster" in avail:
