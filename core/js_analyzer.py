@@ -22,7 +22,7 @@ PATTERNS = {
     "stripe_key":     r'sk_(?:live|test)_[A-Za-z0-9]{24,}',
     "internal_url":   r'https?://(?:internal|intra|admin|corp|staging|dev|localhost|127\.0\.0\.1)[^\s"\'<>]+',
     "graphql":        r'(?:query|mutation|subscription)\s+\w+\s*\{',
-    "endpoint":       r'["\'](?:/api/|/v[0-9]/|/rest/|/graphql)[^\s"\'<>]{3,}["\']',
+    "endpoint":       r'["\'`](/?(?:api|rest|v[0-9]|graphql|socket\.io)/[^\s"\'`<>{}]{2,})["\'`]',
     "s3_bucket":      r's3\.amazonaws\.com/([a-z0-9\-\.]+)',
     "firebase":       r'([a-z0-9\-]+)\.firebaseio\.com',
     "websocket":      r'wss?://[^\s"\'<>]+',
@@ -86,9 +86,11 @@ class JSAnalyzer:
                     if not match:
                         continue
                     if pname == "endpoint":
-                        clean = match.strip("\"'")
-                        if clean not in results["endpoints"]:
-                            results["endpoints"].append(clean)
+                        clean = match.strip("\"'`")
+                        # Make relative SPA routes (e.g. "rest/user/login") absolute
+                        abs_ep = urljoin(self.base + "/", clean.lstrip("/"))
+                        if abs_ep not in results["endpoints"]:
+                            results["endpoints"].append(abs_ep)
                     elif pname == "websocket":
                         results["websockets"].append(match)
                     elif pname == "graphql":
